@@ -15,13 +15,13 @@ import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 
 const firebaseConfig = {
-  apiKey: "AIzaSyC_pTEn8moMAcanvPcWxnrBkJ_1dNv9whQ",
-  authDomain: "upsworth-mind.firebaseapp.com",
-  projectId: "upsworth-mind",
-  storageBucket: "upsworth-mind.firebasestorage.app",
-  messagingSenderId: "402476144317",
-  appId: "1:402476144317:web:4c5c76f27439a2adfa89d4",
-  measurementId: "G-L7CJFSDWB0"
+  apiKey: "AIzaSyB6_DSBrLmINWOn2KZxC8vXIHPgdGF1BM0",
+  authDomain: "upsworth-mind-rout.firebaseapp.com",
+  projectId: "upsworth-mind-rout",
+  storageBucket: "upsworth-mind-rout.firebasestorage.app",
+  messagingSenderId: "1096443275427",
+  appId: "1:1096443275427:web:fec5805c8775ad543f7716",
+  measurementId: "G-Z8BSXL3QXY"
 };
 
 // Check if Firebase is configured (not using placeholder values)
