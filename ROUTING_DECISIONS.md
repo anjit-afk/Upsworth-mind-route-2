@@ -13,16 +13,18 @@
 
 ## Decisions at a glance
 
-| # | Topic | Recommended decision |
-|---|---|---|
-| 1 | Copy/paste & tab-awareness scope | **Same-device only** (cross-device is out of scope) |
-| 2 | What "reference mode writes nothing" means | **No writes of any kind**; shows data as of page load; refresh for newer |
-| 3 | Where "last-used location" lives | **Per-device local pointer**; the link is the source of truth per tab; bind in ONE place (don't rewrite every call site) |
-| 4 | Auth / editor protection (M1.5) | **Stay single-user/no-auth; defer M1.5**; real security = cloud rules (separate task); passwords stay per-device |
-| 5 | Reminders scope & home | **Global (one set), stored in their own cloud doc** so they still sync across devices |
-| 6 | Links use IDs or names | **Opaque IDs**; graceful fallback for dead links; duplicate makes new links (expected) |
-| 7 | Cut across tabs | **Copy-only across tabs**; cut stays within a single tab |
-| 8 | Manual sync vs auto-sync | **Auto-sync stays fully on**; the button is a force-flush; reference tabs disable auto-push |
+> **STATUS: ALL CONFIRMED by the user.** These are now settled and drive the M1–M5 design.
+
+| # | Topic | Confirmed decision | Status |
+|---|---|---|---|
+| 1 | Copy/paste & tab-awareness scope | **Same-device only** (cross-device is out of scope) | ✅ Confirmed |
+| 2 | What "reference mode writes nothing" means | **No writes of any kind**; shows data as of page load; refresh for newer | ✅ Confirmed |
+| 3 | Where "last-used location" lives | Go with recommendation: **per-device local pointer**; the link is the source of truth per tab; bind in ONE place (don't rewrite every call site) | ✅ Confirmed (deferred to recommendation) |
+| 4 | Auth / editor protection | **Not needed now.** Stay single-user/no-auth. A future **separate task** may add a "decoy entrance" (plain link looks broken-but-isn't, in the spirit of the hidden project panel). Passwords stay per-device. | ✅ Confirmed (protection deferred; decoy = separate future task) |
+| 5 | Reminders scope & home | **Global (one set), stored in their own cloud doc** so they still sync across devices | ✅ Confirmed |
+| 6 | Links use IDs or names | **Opaque IDs**; graceful fallback for dead links; duplicate makes new links (expected) | ✅ Confirmed |
+| 7 | Cut across tabs | **Copy-only across tabs**; cut stays within a single tab | ✅ Confirmed |
+| 8 | Manual sync vs auto-sync | **Auto-sync stays fully on** (3s debounce, 30s ceiling, heartbeat). **"Sync to Server" = manual "push up now"** for confirmation (still conflict-safe). Reference tabs never push. | ✅ Confirmed |
 
 ---
 
@@ -157,10 +159,19 @@
 
 **What the code does today (verified):** Automatic sync is always on; the manual "Sync to Server" forces an immediate flush and shows status.
 
-**Recommended decision — the intended contract:**
+**Confirmed decision — the intended contract:**
+
+There are **two directions** of sync, and it's important they're not confused:
+
+- **Pull DOWN (cloud → this device):** happens **automatically** on load, focus, and return. Never a button. If the cloud is newer *and* this device has **no unsaved edits**, it silently adopts the newer version. If the cloud is newer *and* this device **has** unsaved edits, it **stops and asks** which to keep (never silently overwrites either side). This is the core data-loss protection.
+- **Push UP (this device → cloud):** happens **automatically** (3-second debounce, 30-second ceiling, plus heartbeat safety pushes) **and** on demand via the **"Sync to Server"** button.
+
+So:
 - **Automatic sync stays fully ON in editor mode.** It is the primary safety mechanism.
-- **The "Sync to Server" button is a *force-flush* + confirmation**, not a master switch. The manual habit ("sync, wait for Synced, then close/switch device") is a way to **guarantee the server is current before you move to another device** — layered *on top of* auto-sync, not instead of it.
-- **Reference tabs disable auto-push entirely** (per Decision 2), so they never write.
+- **"Sync to Server" means "push my current work up to the cloud right now"** — a force-flush so the user can *see* "Synced" and *know* it's safe before closing or switching devices. It does **not** pull data down, and it is **still conflict-safe** (it goes through the same version check, so it can't clobber newer cloud data — it surfaces a conflict instead).
+- **Reference tabs never push at all** (per Decision 2).
+
+**Version model (confirmed correct):** each cloud save increments a version number (v1, v2, …); **highest = newest**. Each local copy records the cloud version it is *based on*. A device that is "behind" (e.g. based on v13 while cloud is v14) pulls the newer version on load/return, per the rules above.
 
 **Impact on the plan:** No behavior change to editor auto-sync. The contract simply states this coexistence explicitly so the two models aren't ambiguous.
 
@@ -178,15 +189,22 @@
 
 ---
 
-## Final sign-off checklist (before M1/M2 detailed design)
+## Final sign-off checklist (ALL CONFIRMED)
 
-- `[ ]` 1. Same-device only for copy/paste and tab-awareness? (recommended: **yes**)
-- `[ ]` 2. Reference mode = **no writes of any kind**, refresh for newer data? (recommended: **yes**)
-- `[ ]` 3. Link is per-tab truth; per-device `cm-last-location` for bare URLs? (recommended: **yes**)
-- `[ ]` 4. Stay no-auth; **defer M1.5**; pursue cloud rules separately; accept passwords don't cross devices? (recommended: **yes**)
-- `[ ]` 5. Reminders **global + own cloud doc (synced)** — and you accept the global behavior change? (recommended: **yes**; tell me if you'd rather keep per-project)
-- `[ ]` 6. Links use **IDs**, dead links fall back gracefully? (recommended: **yes**)
-- `[ ]` 7. Cross-tab transfer **copy-only**? (recommended: **yes**)
-- `[ ]` 8. Auto-sync stays on; manual button is a force-flush; reference tabs never push? (recommended: **yes**)
+- `[x]` 1. Same-device only for copy/paste and tab-awareness.
+- `[x]` 2. Reference mode = **no writes of any kind**, refresh for newer data.
+- `[x]` 3. Link is per-tab truth; per-device last-location pointer for bare URLs (deferred to recommendation).
+- `[x]` 4. Stay no-auth; protection deferred; a **decoy entrance** is a separate future task; passwords stay per-device.
+- `[x]` 5. Reminders **global + own cloud doc (synced)** — global behavior change accepted.
+- `[x]` 6. Links use **IDs**, dead links fall back gracefully.
+- `[x]` 7. Cross-tab transfer **copy-only**.
+- `[x]` 8. Auto-sync stays on; **"Sync to Server" = manual push-up (conflict-safe)**; reference tabs never push.
 
-**None of these block Milestone 0** (invisible routing groundwork). Points **1, 3, 5, and 8** change the *shape* of the work and should be settled before we design M1/M2 in detail.
+**All decisions are settled.** Next step: begin **Milestone 0** (invisible routing groundwork) on approval, then design M1/M2 in detail using these decisions.
+
+---
+
+## Parked for later (separate tasks, not part of routing)
+
+- **Decoy editor entrance (Decision 4):** the plain link (without the editor route) shows something that *looks broken but isn't*, to keep casual people out — same spirit as the hidden project panel. To be specced separately when the user chooses.
+- **Cloud security rules:** the only *real* data-protection boundary; recommended but tracked outside this routing work.
