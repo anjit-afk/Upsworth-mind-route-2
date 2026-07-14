@@ -14,10 +14,13 @@
 //     sharedId:    string | null,
 //   }
 //
-// MILESTONE 0 SCOPE: every URL resolves to editor intent, so wiring this in
-// changes nothing. Recognising `#/editor/...`, `#/view/...`, and `#/shared/...`
-// is added in later milestones (M1/M2/M6). It is intentionally NOT wired into
-// WorkflowApp yet.
+// MILESTONE 1 SCOPE: the editor route `#/editor/:projectId/:workspaceId` is
+// parsed here. `#/view/...` (reference) and `#/shared/...` arrive in M2/M6; for
+// now any non-editor path safely falls back to editor intent so nothing breaks.
+//
+// IMPORTANT: this parser is side-effect free. IDs (never names) are carried in
+// the path (agreed decision #6). The app treats the URL as the per-tab source
+// of truth for which workspace is shown, but never as authoritative for data.
 // =============================================================================
 
 import { useLocation } from 'react-router-dom';
@@ -30,22 +33,53 @@ export const EDITOR_INTENT = Object.freeze({
   sharedId: null,
 });
 
+/** Decode a single path segment without ever throwing on malformed input. */
+function safeDecode(segment) {
+  if (!segment) return null;
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment; // malformed escape - use the raw segment rather than crash
+  }
+}
+
 /**
  * Pure parser: turn a hash-route pathname into a view intent.
  *
  * Exported separately from the hook so it can be reasoned about / unit-tested
  * without React. It must remain side-effect free (no storage, no navigation).
  *
+ * Recognised shapes:
+ *   /editor/:projectId/:workspaceId  -> editor intent with target ids
+ *   /editor, /editor/:projectId      -> editor intent with partial/no target
+ *   anything else (/, /view/..., ...) -> editor intent, no target (safe default)
+ *
  * @param {string} pathname - the router pathname (the part after the `#`),
- *   e.g. "/", "/editor/p1/w2". Defaults handle null/undefined safely.
+ *   e.g. "/", "/editor/p1/w2". Null/undefined are handled safely.
  * @returns {{mode:'editor'|'reference'|'shared', projectId:string|null, workspaceId:string|null, sharedId:string|null}}
  */
 export function parseRouteIntent(pathname) {
-  // Milestone 0: unconditionally editor. Unknown/root/any path -> editor, so the
-  // app behaves exactly as before. (Later milestones add real parsing here.)
-  // `pathname` is accepted now so the signature is stable when parsing lands.
-  void pathname;
+  const path = typeof pathname === 'string' ? pathname : '';
+  const segments = path.split('/').filter(Boolean); // drop leading/empty parts
+
+  if (segments[0] === 'editor') {
+    return {
+      mode: 'editor',
+      projectId: safeDecode(segments[1]),
+      workspaceId: safeDecode(segments[2]),
+      sharedId: null,
+    };
+  }
+
+  // 'view' (reference) and 'shared' are added in later milestones. Until then,
+  // and for the root / any unknown path, fall back to editor with no target so
+  // the app behaves exactly as before.
   return { ...EDITOR_INTENT };
+}
+
+/** Build the canonical editor path for a project + workspace (ids -> path). */
+export function buildEditorPath(projectId, workspaceId) {
+  return `/editor/${encodeURIComponent(projectId)}/${encodeURIComponent(workspaceId)}`;
 }
 
 /**

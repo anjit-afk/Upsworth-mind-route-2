@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { 
   Plus, Trash2, X, ChevronDown, 
   FileText, Network, FolderOpen, Palette, Check, ZoomIn, ZoomOut, Focus,
@@ -18,6 +19,7 @@ import { GROUP_COLORS } from './taskConstants';
 import { clampPanelPct, DEFAULT_PANEL_PCT } from './PanelResize';
 import MarkdownRenderer from './MarkdownRenderer';
 import CardEditorPanel from './CardEditorPanel';
+import { parseRouteIntent, buildEditorPath } from './routing/useRouteIntent';
 import { isFirebaseConfigured } from './firebase';
 import { validateWorkspaces } from './workspaceValidator';
 import { uploadImage as uploadImageToStorage, deleteImage as deleteImageFromStorage, deleteWorkspaceImages } from './imageStorageService';
@@ -442,6 +444,15 @@ export default function WorkflowApp() {
   const [activeTab, setActiveTab] = useState('');
   const [nextId, setNextId] = useState(10);
   const [initialized, setInitialized] = useState(false);
+
+  // --- Routing (Milestone 1) ---
+  // The URL is the per-tab source of truth for which workspace this tab shows.
+  // Two pieces implement this without loops or extra writes:
+  //   1) init() seeds activeTab from the URL once on load (see init).
+  //   2) a one-way state -> URL mirror effect (below) keeps the link in sync as
+  //      the user navigates. We do NOT modify any setActiveTab call site.
+  const routeLocation = useLocation();
+  const routeNavigate = useNavigate();
   const [syncStatus, setSyncStatus] = useState('offline'); // 'synced', 'syncing', 'error', 'local-only', 'version-mismatch', 'offline'
   const workspaceRef = useRef(null);
 
@@ -1152,7 +1163,22 @@ export default function WorkflowApp() {
           if (import.meta.env.DEV) validateWorkspaces(initialWorkspaces, 'after init migration', activeProj.tasks || []);
           
           setWorkspaces(initialWorkspaces);
-          setActiveTab(activeProj.activeTab || (initialWorkspaces.length > 0 ? initialWorkspaces[0].id : ''));
+          // Routing (M1): if the URL deep-links a workspace in THIS (loaded)
+          // project and it exists, open it - makes links shareable & refresh
+          // stable. Otherwise fall back to the project's stored activeTab, then
+          // its first workspace. (Cross-project deep links are handled in a later
+          // milestone; here they safely fall back to this project.)
+          const _initRouteIntent = parseRouteIntent(routeLocation.pathname);
+          const _initRouteWsValid =
+            _initRouteIntent.mode === 'editor' &&
+            _initRouteIntent.projectId === activeId &&
+            _initRouteIntent.workspaceId &&
+            initialWorkspaces.some(ws => ws.id === _initRouteIntent.workspaceId);
+          setActiveTab(
+            _initRouteWsValid
+              ? _initRouteIntent.workspaceId
+              : (activeProj.activeTab || (initialWorkspaces.length > 0 ? initialWorkspaces[0].id : ''))
+          );
           setNextId(activeProj.nextId || 10);
 
           // Load reminder data
@@ -2102,6 +2128,32 @@ export default function WorkflowApp() {
       }
     }
   }, [storedPassword, initialized, activeProjectId]);
+
+  // --- Routing (Milestone 1): mirror the current view into the URL ---
+  // One-way, idempotent state -> URL sync. Whenever the shown project/workspace
+  // changes - via ANY existing mechanism (workspace dropdown, pin jump, node
+  // portal, project switch) - reflect it in the address bar so this tab is
+  // addressable, shareable, and refresh-stable. `replace` keeps per-workspace
+  // navigation out of the browser history stack.
+  //
+  // DATA SAFETY: this writes NOTHING to Firestore. Setting activeTab does not
+  // trigger a workspace upload (the workspace autosave only uploads on real
+  // content changes; an activeTab-only change yields anyChanged=false), and
+  // updating the URL is a pure client-side operation. The only storage touched
+  // is the per-device `cm-last-location` pointer (unsynced, non-authoritative).
+  useEffect(() => {
+    if (!initialized || !activeProjectId || !activeTab) return;
+    const target = buildEditorPath(activeProjectId, activeTab);
+    try {
+      localStorage.setItem(
+        'cm-last-location',
+        JSON.stringify({ projectId: activeProjectId, workspaceId: activeTab })
+      );
+    } catch { /* storage unavailable/full - non-critical */ }
+    if (routeLocation.pathname !== target) {
+      routeNavigate(target, { replace: true });
+    }
+  }, [initialized, activeProjectId, activeTab, routeLocation.pathname, routeNavigate]);
 
   useEffect(() => {
     setFocusedNodeId(null);
