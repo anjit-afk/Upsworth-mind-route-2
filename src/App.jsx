@@ -570,6 +570,9 @@ export default function WorkflowApp() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyBusy, setHistoryBusy] = useState(false);     // restore/snapshot in progress
   const [confirmRestoreId, setConfirmRestoreId] = useState(null);
+  // M2.5: read-only version PREVIEW in reference tabs. Holds { stamp, label } of
+  // the snapshot currently loaded in-memory for viewing (never written anywhere).
+  const [previewingVersion, setPreviewingVersion] = useState(null);
 
   // --- History (Undo/Redo) States ---
   const pastRef = useRef([]);
@@ -1588,6 +1591,42 @@ export default function WorkflowApp() {
       setHistoryBusy(false);
     }
   }, [pushDirtyNow, isReferenceMode]);
+
+  // --- M2.5: read-only PREVIEW of a snapshot (reference tabs only) ---
+  // Loads a past version into the current view IN-MEMORY ONLY, so you can look
+  // at it without restoring. Writes NOTHING: no localStorage, no Firestore, no
+  // markDirty, no snapshot. "Back to live" is a plain reload of the /view/ URL.
+  const previewSnapshot = useCallback(async (stampId) => {
+    const projectId = activeProjectIdRef.current;
+    if (!projectId) return;
+    setHistoryBusy(true);
+    try {
+      const snap = await loadSnapshot(projectId, stampId);
+      if (!snap || !snap.data) { setErrorMessage('Could not load that version.'); return; }
+      const d = snap.data;
+      const previewWs = (d.workspaces || []).map(w => ({
+        id: w.id, name: w.name || 'Workspace', nodes: w.nodes || [], edges: w.edges || [],
+        groups: computeLayout(w.groups || [], w.nodes || []), pins: w.pins || [], images: w.images || []
+      }));
+      // In-memory display only. Reference mode already suppresses all autosave
+      // (isPreviewMode), so these setState calls upload/persist nothing.
+      setWorkspaces(previewWs);
+      setActiveTab((d.meta && d.meta.activeTab) || (previewWs[0] && previewWs[0].id) || '');
+      setNextId((d.meta && d.meta.nextId) || 10);
+      setTasks(normalizeTasks(d.tasks || []));
+      setTaskGroups((d.taskGroups && d.taskGroups.length) ? d.taskGroups : [{ id: 'inbox', name: 'Inbox', sortOrder: 0, color: 'slate' }]);
+      setReminders((d.meta && d.meta.reminders && d.meta.reminders.length) ? d.meta.reminders : DEFAULT_REMINDERS);
+      setPinGroups((d.meta && d.meta.pinGroups) || []);
+      setPreviewingVersion({ stamp: stampId, label: snap.createdAtUtc ? new Date(snap.createdAtUtc).toLocaleString() : (snap.stamp || stampId) });
+      setShowHistory(false);
+      setConfirmRestoreId(null);
+      setTransform({ x: 0, y: 0, scale: 1 });
+    } catch (e) {
+      setErrorMessage('Preview failed: ' + (e && e.message ? e.message : 'unknown error'));
+    } finally {
+      setHistoryBusy(false);
+    }
+  }, []);
 
   // Register the conflict handler so transactional writes can surface conflicts.
   useEffect(() => {
@@ -6747,6 +6786,21 @@ export default function WorkflowApp() {
         </div>
       )}
 
+      {/* --- Version-preview banner (reference tabs previewing a past snapshot) --- */}
+      {isReferenceMode && previewingVersion && (
+        <div className="shrink-0 flex items-center justify-center gap-2 sm:gap-3 px-3 py-1.5 bg-blue-100 border-b border-blue-300 text-blue-900 text-xs sm:text-sm font-semibold z-[60]">
+          <Timer className="w-4 h-4 shrink-0" />
+          <span className="truncate">Previewing an old version: {previewingVersion.label} — this is a snapshot, not your live data.</span>
+          <button
+            onClick={() => window.location.reload()}
+            className="shrink-0 px-2 py-1 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-colors"
+            title="Return to the current (live) data"
+          >
+            Back to live
+          </button>
+        </div>
+      )}
+
       {/* --- Top Command Toolbar --- */}
       <header className={`h-10 bg-white/50 backdrop-blur-sm border-b border-slate-200/80 flex items-center px-2 sm:px-3 z-50 justify-between shrink-0 gap-1 sm:gap-2 hover:bg-white/90 transition-all duration-300 ${isPreviewMode ? 'border-t-2 border-t-amber-400' : ''}`}>
         <div className="flex items-center gap-1.5 sm:gap-3 min-w-0 flex-1">
@@ -6937,9 +6991,10 @@ export default function WorkflowApp() {
                           </div>
                         </div>
                       </div>
-                      {isFirebaseConfigured() && (
+                      {isFirebaseConfigured() && !isReferenceMode && (
                         <button
                           onClick={async () => {
+                            if (isReferenceMode) return; // read-only viewer never pushes
                             setSyncStatus('syncing');
                             try {
                               firestoreLoadSucceededRef.current = true;
@@ -6999,6 +7054,19 @@ export default function WorkflowApp() {
           >
             <Eye className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">{isPreviewMode ? 'Preview' : 'Preview'}</span>
+          </button>
+          {/* Open the current workspace in a NEW read-only Reference tab */}
+          <button
+            onClick={() => {
+              if (!activeProjectId || !activeTab) return;
+              const base = window.location.href.split('#')[0];
+              window.open(base + '#' + buildViewPath(activeProjectId, activeTab), '_blank', 'noopener');
+            }}
+            className="flex items-center gap-1 px-1.5 sm:px-2.5 py-1 rounded-lg text-xs font-bold transition-all border bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
+            title="Open this workspace in a new read-only Reference tab"
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">View</span>
           </button>
           </>)}
 
@@ -8014,6 +8082,13 @@ export default function WorkflowApp() {
               >
                 <Eye className="w-4 h-4 sm:w-5 sm:h-5" />
               </button>
+              <button
+                onClick={() => { if (!activeProjectId || !activeTab) return; const base = window.location.href.split('#')[0]; window.open(base + '#' + buildViewPath(activeProjectId, activeTab), '_blank', 'noopener'); }}
+                className="p-1.5 sm:p-2 rounded-md transition-colors text-slate-600 hover:bg-slate-100"
+                title="Open this workspace in a new read-only Reference tab"
+              >
+                <ExternalLink className="w-4 h-4 sm:w-5 sm:h-5" />
+              </button>
               <div className="h-px w-5 bg-slate-200 my-0.5" />
               </>)}
               <button
@@ -8651,7 +8726,7 @@ export default function WorkflowApp() {
             <div className="flex items-center justify-between p-4 border-b border-slate-100">
               <div>
                 <h3 className="text-base font-bold text-slate-800">Version history</h3>
-                <p className="text-xs text-slate-400 mt-0.5">Restore an earlier version of this project. Restoring first saves your current version, so it's undoable.</p>
+                <p className="text-xs text-slate-400 mt-0.5">{isReferenceMode ? 'Preview an earlier version read-only. This loads it just for viewing and changes nothing.' : "Restore an earlier version of this project. Restoring first saves your current version, so it's undoable."}</p>
               </div>
               <button onClick={() => { if (!historyBusy) { setShowHistory(false); setConfirmRestoreId(null); } }} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-500"><X className="w-4 h-4" /></button>
             </div>
@@ -8676,7 +8751,10 @@ export default function WorkflowApp() {
                         <span className="text-xs text-slate-400 truncate">from "{it.device}"</span>
                       </div>
                     </div>
-                    {confirmRestoreId === it.id ? (
+                    {isReferenceMode ? (
+                      // Reference tabs: read-only preview only (never restores/writes)
+                      <button disabled={historyBusy} onClick={() => previewSnapshot(it.id)} className="px-3 py-1.5 text-xs font-semibold bg-indigo-100 hover:bg-indigo-200 disabled:opacity-50 text-indigo-700 rounded-lg shrink-0">Preview</button>
+                    ) : confirmRestoreId === it.id ? (
                       <div className="flex items-center gap-1.5 shrink-0">
                         <button disabled={historyBusy} onClick={() => restoreSnapshot(it.id)} className="px-2.5 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg">{historyBusy ? 'Restoring…' : 'Confirm'}</button>
                         <button disabled={historyBusy} onClick={() => setConfirmRestoreId(null)} className="px-2.5 py-1.5 text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg">Cancel</button>
@@ -8704,10 +8782,10 @@ export default function WorkflowApp() {
             </div>
             <div className="p-4 border-t border-slate-100 flex items-center justify-between gap-2">
               <span className="text-xs text-slate-400">Newest 30 versions are kept.</span>
-              {isFirebaseConfigured() && (
+              {isFirebaseConfigured() && !isReferenceMode && (
                 <button
-                  disabled={historyBusy || isReferenceMode}
-                  onClick={async () => { if (isReferenceMode) return; setHistoryBusy(true); try { await createSnapshot(activeProjectId, 'manual'); const items = await listSnapshots(activeProjectId); setHistoryItems(items); } finally { setHistoryBusy(false); } }}
+                  disabled={historyBusy}
+                  onClick={async () => { setHistoryBusy(true); try { await createSnapshot(activeProjectId, 'manual'); const items = await listSnapshots(activeProjectId); setHistoryItems(items); } finally { setHistoryBusy(false); } }}
                   className="px-3 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg"
                 >
                   Save a version now
