@@ -453,14 +453,13 @@ export default function WorkflowApp() {
   //      the user navigates. We do NOT modify any setActiveTab call site.
   const routeLocation = useLocation();
   const routeNavigate = useNavigate();
-  // Reference/Collector mode (Milestone 2): a tab opened at `#/view/:project/:ws`
-  // is a READ-ONLY-but-copyable viewer. This is FIXED for the tab's lifetime
-  // (captured once from the initial URL) so it can never flip to an editor tab
-  // without a fresh load. It reuses the proven preview overlay (which already
-  // blocks edits/saves while still allowing copy).
-  const [isReferenceMode] = useState(
-    () => parseRouteIntent(routeLocation.pathname).mode === 'reference'
-  );
+  // Reference/Collector mode (Milestone 2): a tab whose URL is `#/view/:project/:ws`
+  // is a READ-ONLY-but-copyable viewer. This is derived REACTIVELY from the URL
+  // (not captured once) so the mode always matches the address bar: a `/view/`
+  // URL is always read-only, and navigating to (or reloading at) an `/editor/`
+  // URL always restores full editing. It reuses the proven preview overlay
+  // (which already blocks edits/saves while still allowing copy).
+  const isReferenceMode = parseRouteIntent(routeLocation.pathname).mode === 'reference';
   const [syncStatus, setSyncStatus] = useState('offline'); // 'synced', 'syncing', 'error', 'local-only', 'version-mismatch', 'offline'
   const workspaceRef = useRef(null);
 
@@ -688,9 +687,10 @@ export default function WorkflowApp() {
   // Two independent states: editingState controls Full Edit vs Arrange,
   // isPreviewActive is an overlay that blocks all modifications.
   const [editingState, setEditingState] = useState('fullEdit'); // 'fullEdit' | 'arrange'
-  // Reference tabs start (and stay) in the preview overlay so the read-only
-  // rendering + edit-blocking guards apply immediately on load.
-  const [isPreviewActive, setIsPreviewActive] = useState(isReferenceMode);
+  // The user-toggled preview overlay (editor only). Reference mode does NOT use
+  // this flag; it drives read-only purely through `isPreviewMode` below, so the
+  // two concepts stay decoupled and reference-ness always follows the URL.
+  const [isPreviewActive, setIsPreviewActive] = useState(false);
   // Derived convenience booleans. isPreviewMode intentionally also covers
   // reference mode, so every existing `if (isPreviewMode) return` guard (which
   // blocks edits and suppresses saves) protects reference tabs too. Copy is NOT
@@ -867,30 +867,46 @@ export default function WorkflowApp() {
         let firestoreActiveId = null;
         let firestoreDefaultId = null;
         let hasVersionMismatch = false;
+        // When the URL names a real project (editor deep-link or /view/ reference),
+        // this holds that project id so we DISPLAY it (not the default). Stays null
+        // for a bare URL, preserving the original boot behavior.
+        let routeDisplayProjectId = null;
         if (isFirebaseConfigured()) {
           setSyncStatus('syncing');
           try {
             // Load from subcollection format (userMeta + project docs + workspace subcollections)
             const userMeta = await loadUserMeta();
             if (userMeta && userMeta.activeProjectId) {
-              const projectMeta = await loadProjectFromFirestore(userMeta.activeProjectId);
+              // Decide which project THIS tab opens. A URL that names a real
+              // project (editor deep-link or /view/ reference) drives which
+              // project's data we fetch AND which we display. A bare URL keeps
+              // the original behavior (load the stored active project).
+              const _bootIntent = parseRouteIntent(routeLocation.pathname);
+              let loadProjectId = userMeta.activeProjectId;
+              if (_bootIntent.projectId && _bootIntent.projectId !== userMeta.activeProjectId) {
+                const _routeProjMeta = await loadProjectFromFirestore(_bootIntent.projectId);
+                if (_routeProjMeta) { loadProjectId = _bootIntent.projectId; routeDisplayProjectId = _bootIntent.projectId; }
+              } else if (_bootIntent.projectId && _bootIntent.projectId === userMeta.activeProjectId) {
+                routeDisplayProjectId = userMeta.activeProjectId;
+              }
+              const projectMeta = await loadProjectFromFirestore(loadProjectId);
               if (projectMeta) {
-                // Load workspaces from subcollections (only for active project)
+                // Load workspaces from subcollections (only for the project this tab opens)
                 const workspaceIds = projectMeta.workspaceIds || [];
                 const loadedWorkspaces = [];
                 for (const wsId of workspaceIds) {
-                  const wsData = await loadWorkspaceFromFirestore(userMeta.activeProjectId, wsId);
+                  const wsData = await loadWorkspaceFromFirestore(loadProjectId, wsId);
                   if (wsData) loadedWorkspaces.push(wsData);
                 }
-                const tasksData = await loadTasksFromFirestore(userMeta.activeProjectId);
+                const tasksData = await loadTasksFromFirestore(loadProjectId);
 
                 // Load ALL projects from Firestore (not just the active one)
                 const allProjectsMap = await loadAllProjectsFromFirestore();
                 const allProjects = [];
                 if (allProjectsMap && allProjectsMap.size > 0) {
                   for (const [pid, pmeta] of allProjectsMap) {
-                    if (pid === userMeta.activeProjectId) {
-                      // For the active project, attach full workspace/task data
+                    if (pid === loadProjectId) {
+                      // For the opened project, attach full workspace/task data
                       allProjects.push({
                         ...pmeta,
                         id: pid,
@@ -910,10 +926,10 @@ export default function WorkflowApp() {
                     }
                   }
                 } else {
-                  // Fallback: if getDocs on projects collection failed, at least include active project
+                  // Fallback: if getDocs on projects collection failed, at least include the opened project
                   allProjects.push({
                     ...projectMeta,
-                    id: userMeta.activeProjectId,
+                    id: loadProjectId,
                     workspaces: loadedWorkspaces.length > 0 ? loadedWorkspaces : undefined,
                     tasks: tasksData ? (tasksData.tasks || []) : [],
                     taskGroups: tasksData ? (tasksData.taskGroups || []) : []
@@ -921,7 +937,7 @@ export default function WorkflowApp() {
                 }
 
                 firestoreProjects = allProjects;
-                firestoreActiveId = userMeta.activeProjectId;
+                firestoreActiveId = loadProjectId;
                 firestoreDefaultId = userMeta.defaultProjectId || userMeta.activeProjectId;
 
                 // --- SERVER-AUTHORITATIVE LOAD WITH DIRTY-EDIT PRESERVATION ---
@@ -931,9 +947,10 @@ export default function WorkflowApp() {
                 // is queued for the user. This both prevents losing unsynced edits
                 // on a refresh AND prevents a stale device from overwriting newer
                 // cloud data. We never discard the freshly-loaded Firestore data.
-                const _pid = userMeta.activeProjectId;
-                // Project metadata document
-                {
+                const _pid = loadProjectId;
+                // Project metadata document (skipped for read-only reference tabs,
+                // which never seed sync-state, write cache, or raise conflicts)
+                if (!isReferenceMode) {
                   const mPath = metaPath(_pid);
                   const st = getSyncState(mPath);
                   const serverRev = projectMeta.revision || 0;
@@ -944,7 +961,7 @@ export default function WorkflowApp() {
                   }
                 }
                 // Tasks document
-                if (tasksData) {
+                if (tasksData && !isReferenceMode) {
                   const tPath = tasksPath(_pid);
                   const st = getSyncState(tPath);
                   const serverRev = tasksData.revision || 0;
@@ -956,7 +973,7 @@ export default function WorkflowApp() {
                   }
                 }
                 // Active project's workspace documents (preserve dirty local bodies)
-                for (let i = 0; i < loadedWorkspaces.length; i++) {
+                for (let i = 0; !isReferenceMode && i < loadedWorkspaces.length; i++) {
                   const ws = loadedWorkspaces[i];
                   const path = wsPath(_pid, ws.id);
                   const st = getSyncState(path);
@@ -990,8 +1007,9 @@ export default function WorkflowApp() {
                     setSyncStatus('synced');
                   }
 
-                  // Hydrate localStorage with ALL project metadata from Firestore
-                  for (const proj of firestoreProjects) {
+                  // Hydrate localStorage with ALL project metadata from Firestore.
+                  // Reference tabs skip this - they must not write the shared cache.
+                  if (!isReferenceMode) for (const proj of firestoreProjects) {
                     const wsIds = (proj.workspaces || []).map(ws => ws.id);
                     // Preserve existing localStorage password hash (passwords are stored
                     // only in localStorage and intentionally stripped from Firestore)
@@ -1076,6 +1094,12 @@ export default function WorkflowApp() {
               loadedProjects = projectsArray;
               loadedActiveId = meta.activeProjectId;
               loadedDefaultId = meta.defaultProjectId || meta.activeProjectId;
+              // URL-driven display in degraded (localStorage-only) mode too: if the
+              // URL names a project we have locally, open it.
+              const _fbIntent = parseRouteIntent(routeLocation.pathname);
+              if (_fbIntent.projectId && projectsArray.some(p => p.id === _fbIntent.projectId)) {
+                routeDisplayProjectId = _fbIntent.projectId;
+              }
             }
           }
         }
@@ -1118,8 +1142,9 @@ export default function WorkflowApp() {
             return updated;
           });
 
-          // Persist field additions to per-workspace keys if needed
-          if (needsSave || migrationNeeded) {
+          // Persist field additions to per-workspace keys if needed.
+          // Reference tabs never write the shared cache (read-only).
+          if ((needsSave || migrationNeeded) && !isReferenceMode) {
             for (const proj of fullyMigrated) {
               const wsIds = (proj.workspaces || []).map(ws => ws.id);
               // Preserve existing localStorage password hash if the in-memory
@@ -1157,11 +1182,14 @@ export default function WorkflowApp() {
           }
           setDefaultProjectId(resolvedDefaultId);
 
-          // Save meta
-          saveMeta({ activeProjectId: resolvedDefaultId, defaultProjectId: resolvedDefaultId, schemaVersion: 2 });
-
-          // Always load the default project on page load
-          const activeId = resolvedDefaultId;
+          // This tab opens the URL's project when it named a real one; otherwise
+          // the default (original behavior). A reference tab must NOT write the
+          // shared active-project pointer (that would disrupt an editor tab on
+          // this same device).
+          const activeId = routeDisplayProjectId || resolvedDefaultId;
+          if (!isReferenceMode) {
+            saveMeta({ activeProjectId: activeId, defaultProjectId: resolvedDefaultId, schemaVersion: 2 });
+          }
           setActiveProjectId(activeId);
           const activeProj = fullyMigrated.find(p => p.id === activeId) || fullyMigrated[0];
           
@@ -1559,7 +1587,7 @@ export default function WorkflowApp() {
     } finally {
       setHistoryBusy(false);
     }
-  }, [pushDirtyNow]);
+  }, [pushDirtyNow, isReferenceMode]);
 
   // Register the conflict handler so transactional writes can surface conflicts.
   useEffect(() => {
@@ -1640,7 +1668,7 @@ export default function WorkflowApp() {
       window.removeEventListener('online', onOnline);
       clearInterval(interval);
     };
-  }, [initialized, runFreshnessCheck, pushDirtyNow]);
+  }, [initialized, isReferenceMode, runFreshnessCheck, pushDirtyNow]);
 
   // Save a losing copy so a conflict resolution can NEVER lose data. Phase 3
   // will surface these in a history UI; for now they live in localStorage.
@@ -1900,7 +1928,7 @@ export default function WorkflowApp() {
       window.removeEventListener('beforeunload', handleBeforeUnload);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, []);
+  }, [isReferenceMode]);
 
   // --- Export Reminder Breathing Animation (every 5 minutes) ---
   const exportBreathTimeoutRef = useRef(null);
@@ -2368,7 +2396,7 @@ export default function WorkflowApp() {
         console.error('Failed to hydrate project on mode switch:', err);
       }
     }
-  }, [activeProjectId, workspaces, isPreviewActive]);
+  }, [activeProjectId, workspaces, isPreviewActive, isReferenceMode]);
 
   // --- Toggle Editing State (Full Edit <-> Arrange) ---
   const toggleEditingState = useCallback(() => {
@@ -2382,7 +2410,7 @@ export default function WorkflowApp() {
         return 'fullEdit';
       }
     });
-  }, [isPreviewActive]);
+  }, [isPreviewActive, isReferenceMode]);
   toggleEditingStateRef.current = toggleEditingState;
 
   // --- Copy/Cut/Paste Node Functions ---
@@ -4393,7 +4421,7 @@ export default function WorkflowApp() {
     } catch {
       setSyncStatus('error');
     }
-  }, [activeProjectId]);
+  }, [activeProjectId, isReferenceMode]);
 
   // --- Import / Export ---
   const exportData = () => {
@@ -6690,7 +6718,35 @@ export default function WorkflowApp() {
 
   return (
     <div className="flex flex-col h-screen w-full bg-[#f8fafc] font-sans text-slate-800 selection:bg-indigo-100 overflow-hidden">
-      
+
+      {/* --- Reference (read-only) banner --- */}
+      {isReferenceMode && (
+        <div className="shrink-0 flex items-center justify-center gap-2 sm:gap-3 px-3 py-1.5 bg-amber-100 border-b border-amber-300 text-amber-900 text-xs sm:text-sm font-semibold z-[60]">
+          <Eye className="w-4 h-4 shrink-0" />
+          <span className="truncate">Reference view (read-only snapshot). Editing, saving, importing and switching are disabled here.</span>
+          <button
+            onClick={() => {
+              if (!activeProjectId || !activeTab) return;
+              // Hard-navigate to the editor URL and reload so init() runs in
+              // editor mode with proper sync-state seeding (reference skips it).
+              window.location.hash = buildEditorPath(activeProjectId, activeTab);
+              window.location.reload();
+            }}
+            className="shrink-0 px-2 py-1 rounded-md bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-colors"
+            title="Open this workspace in the editor"
+          >
+            Open in editor
+          </button>
+          <button
+            onClick={() => window.location.reload()}
+            className="shrink-0 px-2 py-1 rounded-md bg-white/70 hover:bg-white text-amber-800 border border-amber-300 text-xs font-bold transition-colors"
+            title="Reload to fetch the latest saved data"
+          >
+            Refresh
+          </button>
+        </div>
+      )}
+
       {/* --- Top Command Toolbar --- */}
       <header className={`h-10 bg-white/50 backdrop-blur-sm border-b border-slate-200/80 flex items-center px-2 sm:px-3 z-50 justify-between shrink-0 gap-1 sm:gap-2 hover:bg-white/90 transition-all duration-300 ${isPreviewMode ? 'border-t-2 border-t-amber-400' : ''}`}>
         <div className="flex items-center gap-1.5 sm:gap-3 min-w-0 flex-1">
@@ -7024,18 +7080,24 @@ export default function WorkflowApp() {
             <div className="p-4 border-b border-slate-100">
               <div className="flex flex-col gap-2">
                 <div className="flex items-center gap-2">
-                  <button onClick={() => fileInputRef.current?.click()} className="flex-1 flex items-center justify-center px-3 py-2 hover:bg-slate-100 text-slate-600 text-sm font-medium rounded-lg border border-slate-200 transition-colors" title="Import Map JSON">
-                    <Upload className="w-4 h-4 mr-1.5" /> Import
-                  </button>
+                  {/* Import writes data - hidden in read-only reference tabs */}
+                  {!isReferenceMode && (
+                    <button onClick={() => fileInputRef.current?.click()} className="flex-1 flex items-center justify-center px-3 py-2 hover:bg-slate-100 text-slate-600 text-sm font-medium rounded-lg border border-slate-200 transition-colors" title="Import Map JSON">
+                      <Upload className="w-4 h-4 mr-1.5" /> Import
+                    </button>
+                  )}
                   <button onClick={exportData} className="flex-1 flex items-center justify-center px-3 py-2 hover:bg-slate-100 text-slate-600 text-sm font-medium rounded-lg border border-slate-200 transition-colors" title="Export Map JSON">
                     <Download className="w-4 h-4 mr-1.5" /> Export
                   </button>
                 </div>
+                {!isReferenceMode && (
                 <div className="flex items-center gap-2">
                   <button onClick={() => partialImportInputRef.current?.click()} className="flex-1 flex items-center justify-center px-3 py-2 hover:bg-slate-100 text-slate-600 text-sm font-medium rounded-lg border border-slate-200 transition-colors" title="Partial Import (Insert into canvas)">
                     <ClipboardPaste className="w-4 h-4 mr-1.5" /> Partial
                   </button>
                 </div>
+                )}
+                {!isReferenceMode && (
                 <button
                   onClick={handleManualServerSync}
                   disabled={syncStatus === 'syncing' || !isFirebaseConfigured()}
@@ -7051,6 +7113,7 @@ export default function WorkflowApp() {
                   {syncStatus === 'syncing' ? <Loader className="w-4 h-4 animate-spin" /> : <Cloud className="w-4 h-4" />}
                   {syncStatus === 'syncing' ? 'Syncing...' : 'Sync to Server'}
                 </button>
+                )}
                 <div className="flex items-center bg-slate-100 rounded-xl p-1 gap-0.5">
                   <button
                     onClick={() => setViewMode('canvas')}
