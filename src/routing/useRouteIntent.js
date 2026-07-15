@@ -71,15 +71,29 @@ export function parseRouteIntent(pathname) {
     };
   }
 
-  // 'view' (reference) and 'shared' are added in later milestones. Until then,
-  // and for the root / any unknown path, fall back to editor with no target so
-  // the app behaves exactly as before.
+  // Reference / Collector mode: read-only-but-copyable view of a workspace.
+  if (segments[0] === 'view') {
+    return {
+      mode: 'reference',
+      projectId: safeDecode(segments[1]),
+      workspaceId: safeDecode(segments[2]),
+      sharedId: null,
+    };
+  }
+
+  // 'shared' is added in a later milestone. For the root / any unknown path,
+  // fall back to editor with no target so the app behaves exactly as before.
   return { ...EDITOR_INTENT };
 }
 
 /** Build the canonical editor path for a project + workspace (ids -> path). */
 export function buildEditorPath(projectId, workspaceId) {
   return `/editor/${encodeURIComponent(projectId)}/${encodeURIComponent(workspaceId)}`;
+}
+
+/** Build the canonical reference/view path for a project + workspace. */
+export function buildViewPath(projectId, workspaceId) {
+  return `/view/${encodeURIComponent(projectId)}/${encodeURIComponent(workspaceId)}`;
 }
 
 /**

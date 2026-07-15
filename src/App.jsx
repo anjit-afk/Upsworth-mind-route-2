@@ -19,7 +19,7 @@ import { GROUP_COLORS } from './taskConstants';
 import { clampPanelPct, DEFAULT_PANEL_PCT } from './PanelResize';
 import MarkdownRenderer from './MarkdownRenderer';
 import CardEditorPanel from './CardEditorPanel';
-import { parseRouteIntent, buildEditorPath } from './routing/useRouteIntent';
+import { parseRouteIntent, buildEditorPath, buildViewPath } from './routing/useRouteIntent';
 import { isFirebaseConfigured } from './firebase';
 import { validateWorkspaces } from './workspaceValidator';
 import { uploadImage as uploadImageToStorage, deleteImage as deleteImageFromStorage, deleteWorkspaceImages } from './imageStorageService';
@@ -453,6 +453,14 @@ export default function WorkflowApp() {
   //      the user navigates. We do NOT modify any setActiveTab call site.
   const routeLocation = useLocation();
   const routeNavigate = useNavigate();
+  // Reference/Collector mode (Milestone 2): a tab opened at `#/view/:project/:ws`
+  // is a READ-ONLY-but-copyable viewer. This is FIXED for the tab's lifetime
+  // (captured once from the initial URL) so it can never flip to an editor tab
+  // without a fresh load. It reuses the proven preview overlay (which already
+  // blocks edits/saves while still allowing copy).
+  const [isReferenceMode] = useState(
+    () => parseRouteIntent(routeLocation.pathname).mode === 'reference'
+  );
   const [syncStatus, setSyncStatus] = useState('offline'); // 'synced', 'syncing', 'error', 'local-only', 'version-mismatch', 'offline'
   const workspaceRef = useRef(null);
 
@@ -680,12 +688,18 @@ export default function WorkflowApp() {
   // Two independent states: editingState controls Full Edit vs Arrange,
   // isPreviewActive is an overlay that blocks all modifications.
   const [editingState, setEditingState] = useState('fullEdit'); // 'fullEdit' | 'arrange'
-  const [isPreviewActive, setIsPreviewActive] = useState(false);
-  // Derived convenience booleans
-  const isPreviewMode = isPreviewActive;
+  // Reference tabs start (and stay) in the preview overlay so the read-only
+  // rendering + edit-blocking guards apply immediately on load.
+  const [isPreviewActive, setIsPreviewActive] = useState(isReferenceMode);
+  // Derived convenience booleans. isPreviewMode intentionally also covers
+  // reference mode, so every existing `if (isPreviewMode) return` guard (which
+  // blocks edits and suppresses saves) protects reference tabs too. Copy is NOT
+  // guarded by isPreviewMode, so copying still works - exactly what a collector
+  // tab needs.
+  const isPreviewMode = isPreviewActive || isReferenceMode;
   const isArrangeMode = editingState === 'arrange';
   const isFullEditMode = editingState === 'fullEdit';
-  const editMode = isFullEditMode && !isPreviewActive; // guards inline card text editing
+  const editMode = isFullEditMode && !isPreviewMode; // guards inline card text editing
   const [passwordInput, setPasswordInput] = useState('');
   const [passwordError, setPasswordError] = useState('');
   const [showGatePassword, setShowGatePassword] = useState(false);
@@ -1020,7 +1034,9 @@ export default function WorkflowApp() {
           // by a stale device (the reported disappearing-workspace bug), while the
           // tombstone guard in reconcileWorkspaceIds prevents resurrecting a
           // workspace that was intentionally deleted.
-          if (!hasVersionMismatch && loadedActiveId) {
+          // Reference tabs are pure read-only viewers: never run reconcile (it is
+          // a write via arrayUnion). This keeps a reference tab non-destructive.
+          if (!hasVersionMismatch && loadedActiveId && !isReferenceMode) {
             reconcileWorkspaceIds(loadedActiveId).catch(err => {
               console.warn('[Firebase] Workspace reconciliation failed:', err.message);
             });
@@ -1170,7 +1186,7 @@ export default function WorkflowApp() {
           // milestone; here they safely fall back to this project.)
           const _initRouteIntent = parseRouteIntent(routeLocation.pathname);
           const _initRouteWsValid =
-            _initRouteIntent.mode === 'editor' &&
+            (_initRouteIntent.mode === 'editor' || _initRouteIntent.mode === 'reference') &&
             _initRouteIntent.projectId === activeId &&
             _initRouteIntent.workspaceId &&
             initialWorkspaces.some(ws => ws.id === _initRouteIntent.workspaceId);
@@ -1287,8 +1303,11 @@ export default function WorkflowApp() {
       justInitializedRef.current = true;
       // Check dirty flag: if a previous session's flush was interrupted, schedule a
       // forced sync of local data to Firestore after init completes.
+      // Reference tabs must never push: skip the recovery sync entirely and leave
+      // the dirty flag untouched so an editor tab (this or another device) still
+      // performs the recovery. A reference tab reads only.
       const dirtyFlag = localStorage.getItem('cm-dirty-flag');
-      if (dirtyFlag && isFirebaseConfigured() && firestoreLoadSucceededRef.current) {
+      if (dirtyFlag && isFirebaseConfigured() && firestoreLoadSucceededRef.current && !isReferenceMode) {
         // Schedule a recovery sync after a short delay to allow React state to settle
         setTimeout(() => {
           const meta = loadMeta();
@@ -1309,8 +1328,10 @@ export default function WorkflowApp() {
             localStorage.removeItem('cm-dirty-flag');
           }
         }, 2000);
-      } else {
-        // No dirty flag or no Firebase configured - clear unconditionally
+      } else if (!isReferenceMode) {
+        // No dirty flag or no Firebase configured - clear unconditionally.
+        // Reference tabs never touch the dirty flag: an editor tab (here or on
+        // another device) owns recovery, so a read-only viewer must not clear it.
         localStorage.removeItem('cm-dirty-flag');
       }
       setInitialized(true);
@@ -1478,6 +1499,7 @@ export default function WorkflowApp() {
 
   // --- Phase 3: restore a full-project snapshot (undoable via a pre-restore snapshot) ---
   const restoreSnapshot = useCallback(async (stampId) => {
+    if (isReferenceMode) return; // read-only reference tab never restores/overwrites data
     const projectId = activeProjectIdRef.current;
     if (!projectId) return;
     setHistoryBusy(true);
@@ -1565,8 +1587,11 @@ export default function WorkflowApp() {
 
   // Return-check wiring: activity tracking, visibility/focus/online, wake
   // detection (heartbeat time-jump), and a background version poll.
+  // Reference tabs are pure read-only viewers: they never push dirty edits,
+  // never adopt-and-reseed sync-state, and never auto-snapshot. They show the
+  // data as of page load (refresh to see newer), so skip this entire machinery.
   useEffect(() => {
-    if (!initialized) return;
+    if (!initialized || isReferenceMode) return;
     const recordActivity = () => { lastActivityRef.current = Date.now(); };
     const activityEvents = ['pointerdown', 'keydown', 'wheel', 'touchstart'];
     activityEvents.forEach(ev => window.addEventListener(ev, recordActivity, { passive: true }));
@@ -1836,7 +1861,10 @@ export default function WorkflowApp() {
 
   // --- Flush pending Firestore writes on tab close or hide ---
   // Ensures debounced 3s server saves are not lost when the user navigates away.
+  // Reference tabs have nothing to flush and must never set/clear the shared
+  // cm-dirty-flag (an editor tab on this device owns it), so skip entirely.
   useEffect(() => {
+    if (isReferenceMode) return;
     const DIRTY_FLAG_KEY = 'cm-dirty-flag';
 
     const handleBeforeUnload = () => {
@@ -2115,6 +2143,7 @@ export default function WorkflowApp() {
   // Password save effect
   useEffect(() => {
     if (!initialized || !activeProjectId) return;
+    if (isReferenceMode) return; // read-only viewer: never writes password/meta
     setProjects(prev => prev.map(p => p.id === activeProjectId
       ? { ...p, password: storedPassword }
       : p
@@ -2143,17 +2172,25 @@ export default function WorkflowApp() {
   // is the per-device `cm-last-location` pointer (unsynced, non-authoritative).
   useEffect(() => {
     if (!initialized || !activeProjectId || !activeTab) return;
-    const target = buildEditorPath(activeProjectId, activeTab);
-    try {
-      localStorage.setItem(
-        'cm-last-location',
-        JSON.stringify({ projectId: activeProjectId, workspaceId: activeTab })
-      );
-    } catch { /* storage unavailable/full - non-critical */ }
+    // Editor tabs mirror to /editor/...; reference tabs stay on /view/... so the
+    // tab keeps its read-only identity even as the user views other workspaces.
+    const target = isReferenceMode
+      ? buildViewPath(activeProjectId, activeTab)
+      : buildEditorPath(activeProjectId, activeTab);
+    // Reference tabs must not write anything, not even the local last-location
+    // hint (that pointer represents the editor's resume point).
+    if (!isReferenceMode) {
+      try {
+        localStorage.setItem(
+          'cm-last-location',
+          JSON.stringify({ projectId: activeProjectId, workspaceId: activeTab })
+        );
+      } catch { /* storage unavailable/full - non-critical */ }
+    }
     if (routeLocation.pathname !== target) {
       routeNavigate(target, { replace: true });
     }
-  }, [initialized, activeProjectId, activeTab, routeLocation.pathname, routeNavigate]);
+  }, [initialized, activeProjectId, activeTab, routeLocation.pathname, routeNavigate, isReferenceMode]);
 
   useEffect(() => {
     setFocusedNodeId(null);
@@ -2270,6 +2307,8 @@ export default function WorkflowApp() {
 
   // --- Toggle Preview Mode (on/off overlay) ---
   const togglePreviewMode = useCallback(async () => {
+    // Reference tabs are permanently read-only: they cannot exit into editing.
+    if (isReferenceMode) return;
     // Capture the transition direction before the state update
     const wasInPreview = isPreviewActive;
 
@@ -2333,7 +2372,7 @@ export default function WorkflowApp() {
 
   // --- Toggle Editing State (Full Edit <-> Arrange) ---
   const toggleEditingState = useCallback(() => {
-    if (isPreviewActive) return; // Cannot toggle editing state while in Preview
+    if (isPreviewActive || isReferenceMode) return; // No mode toggling in preview/reference
     setEditingState(prev => {
       if (prev === 'fullEdit') {
         // Entering Arrange: clear any in-progress text editing
@@ -3447,6 +3486,7 @@ export default function WorkflowApp() {
 
   // --- Workspace (Tab) Operations ---
   const addWorkspace = async () => {
+    if (isReferenceMode) return; // read-only reference tab never writes
     if (isPreviewMode) return;
     takeSnapshot();
 
@@ -3477,6 +3517,7 @@ export default function WorkflowApp() {
   };
 
   const deleteWorkspace = async (id, e) => {
+    if (isReferenceMode) return; // read-only reference tab never deletes
     if (isPreviewMode) { e.stopPropagation(); return; }
     e.stopPropagation();
     if (workspaces.length <= 1) return;
@@ -3530,12 +3571,14 @@ export default function WorkflowApp() {
   };
 
   const renameWorkspace = (id, newName) => {
+    if (isReferenceMode) return; // read-only reference tab never writes
     if (isPreviewMode) return;
     setWorkspaces(prev => prev.map(ws => ws.id === id ? { ...ws, name: newName } : ws));
     setEditingTab(null);
   };
 
   const duplicateWorkspace = (wsId) => {
+    if (isReferenceMode) return; // read-only reference tab never writes
     if (isPreviewMode) return;
     takeSnapshot();
     const source = workspaces.find(w => w.id === wsId);
@@ -3681,6 +3724,7 @@ export default function WorkflowApp() {
   };
 
   const createProject = async () => {
+    if (isReferenceMode) return; // read-only reference tab never writes
     if (!projectNameInput.trim()) {
       setProjectError('Project name is required.');
       return;
@@ -3752,6 +3796,7 @@ export default function WorkflowApp() {
   };
 
   const switchProject = async (targetId) => {
+    if (isReferenceMode) return; // read-only reference tab stays on its workspace
     const target = projects.find(p => p.id === targetId);
     if (!target) return;
     const hashedInput = await hashPassword(projectPasswordInput);
@@ -3844,6 +3889,7 @@ export default function WorkflowApp() {
 
   // Passwordless project switch - used by boss key (Ctrl+Shift+/) and default project switch from panel
   const cycleToProject = async (targetId) => {
+    if (isReferenceMode) return; // read-only reference tab stays on its workspace
     const target = projectsRef.current.find(p => p.id === targetId);
     if (!target) return;
     const { workspaces: currentWs, activeTab: currentTab, nextId: currentNextId } = stateRef.current;
@@ -3939,6 +3985,7 @@ export default function WorkflowApp() {
 
   // Save/edit a project from the modal
   const saveEditProject = async () => {
+    if (isReferenceMode) return; // read-only reference tab never edits projects
     if (!projectNameInput.trim()) {
       setProjectError('Project name is required.');
       return;
@@ -4021,6 +4068,7 @@ export default function WorkflowApp() {
 
   // Duplicate a project
   const duplicateProject = (targetId) => {
+    if (isReferenceMode) return; // read-only reference tab never writes
     const target = projects.find(p => p.id === targetId);
     if (!target) return;
     const cloned = JSON.parse(JSON.stringify(target));
@@ -4163,6 +4211,7 @@ export default function WorkflowApp() {
   };
 
   const deleteProject = async (targetId) => {
+    if (isReferenceMode) return; // read-only reference tab never deletes
     const target = projects.find(p => p.id === targetId);
     if (!target) return;
     if (projects.length <= 1) {
@@ -4254,6 +4303,7 @@ export default function WorkflowApp() {
   };
 
   const changeProjectPassword = async () => {
+    if (isReferenceMode) return; // read-only reference tab never edits projects
     const current = projects.find(p => p.id === activeProjectId);
     if (!current) return;
     // Default project cannot have a password
@@ -4335,6 +4385,7 @@ export default function WorkflowApp() {
   // --- Manual Server Sync Handler ---
   const handleManualServerSync = useCallback(async () => {
     if (!isFirebaseConfigured() || !activeProjectId) return;
+    if (isReferenceMode) return; // read-only viewer never pushes to the server
     setSyncStatus('syncing');
     try {
       const success = await manualServerSync(activeProjectId);
@@ -4466,6 +4517,7 @@ export default function WorkflowApp() {
 
   // Import full backup data
   const importAllData = (e) => {
+    if (isReferenceMode) { if (e && e.target) e.target.value = ''; return; } // read-only reference tab never imports
     const file = e.target.files[0];
     if (!file) return;
 
@@ -4568,6 +4620,7 @@ export default function WorkflowApp() {
 
   // --- Partial Import ---
   const handlePartialImportFile = (e) => {
+    if (isReferenceMode) { if (e && e.target) e.target.value = ''; return; } // read-only reference tab never imports
     const file = e.target.files[0];
     if (!file) return;
     const reader = new FileReader();
@@ -6860,7 +6913,8 @@ export default function WorkflowApp() {
 
           <div className="w-px h-5 sm:h-6 bg-slate-200 mx-0.5 sm:mx-1"></div>
 
-          {/* App Mode Toggle - Three states: Full Edit / Arrange / Preview */}
+          {/* App Mode + Preview toggles - hidden entirely in read-only reference tabs */}
+          {!isReferenceMode && (<>
           <button
             onClick={toggleEditingState}
             className={`flex items-center gap-1 px-1.5 sm:px-2.5 py-1 rounded-lg text-xs font-bold transition-all border ${
@@ -6890,6 +6944,7 @@ export default function WorkflowApp() {
             <Eye className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">{isPreviewMode ? 'Preview' : 'Preview'}</span>
           </button>
+          </>)}
 
           <div className="w-px h-5 sm:h-6 bg-slate-200 mx-0.5 sm:mx-1"></div>
 
@@ -7879,6 +7934,7 @@ export default function WorkflowApp() {
 
             {/* Single vertical button column */}
             <div className="flex flex-col items-center bg-white rounded-lg shadow-lg border border-slate-200 p-1 gap-0.5">
+              {!isReferenceMode && (<>
               <button
                 onClick={toggleEditingState}
                 className={`p-1.5 sm:p-2 rounded-md transition-colors ${isPreviewMode ? 'bg-amber-50 text-amber-600 cursor-not-allowed opacity-60' : (isArrangeMode ? 'bg-cyan-50 text-cyan-600' : 'bg-indigo-50 text-indigo-600')}`}
@@ -7896,6 +7952,7 @@ export default function WorkflowApp() {
                 <Eye className="w-4 h-4 sm:w-5 sm:h-5" />
               </button>
               <div className="h-px w-5 bg-slate-200 my-0.5" />
+              </>)}
               <button
                 onClick={() => { setShowTimer(prev => !prev); if (timerDone) setTimerDone(false); }}
                 className={`p-1.5 sm:p-2 rounded-md transition-colors ${showTimer ? 'bg-indigo-50 text-indigo-600' : 'text-slate-600 hover:bg-slate-100'} ${timerDone ? 'animate-pulse ring-2 ring-orange-400' : ''}`}
@@ -8586,8 +8643,8 @@ export default function WorkflowApp() {
               <span className="text-xs text-slate-400">Newest 30 versions are kept.</span>
               {isFirebaseConfigured() && (
                 <button
-                  disabled={historyBusy}
-                  onClick={async () => { setHistoryBusy(true); try { await createSnapshot(activeProjectId, 'manual'); const items = await listSnapshots(activeProjectId); setHistoryItems(items); } finally { setHistoryBusy(false); } }}
+                  disabled={historyBusy || isReferenceMode}
+                  onClick={async () => { if (isReferenceMode) return; setHistoryBusy(true); try { await createSnapshot(activeProjectId, 'manual'); const items = await listSnapshots(activeProjectId); setHistoryItems(items); } finally { setHistoryBusy(false); } }}
                   className="px-3 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg"
                 >
                   Save a version now
