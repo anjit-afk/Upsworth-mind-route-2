@@ -22,6 +22,7 @@
 - **Addressable app:** every project + workspace has its own link (using `#`-style links, e.g. `.../#/editor/<project>/<workspace>`).
 - **Editor route:** the normal editing experience, behaves exactly like today.
 - **Reference / Collector mode:** a link that opens a workspace where you can **pan, select, and copy — but not edit**. Its main purpose is gathering objects from several workspaces into the one you're building.
+- **Editor → View entry + reference polish (M2.5):** a **"View" button in the editor** opens the current workspace in a **new reference tab**; the reference top-bar "Data & sync" menu **hides write actions** (e.g. "Sync now"); **version history is previewable read-only** from a reference tab (no restore/write).
 - **Cross-tab copy/paste:** copy in one browser tab, paste into a workspace open in another browser tab.
 - **Multi-tab awareness:**
   - Different workspaces / different projects in different tabs → welcome, no nagging.
@@ -59,11 +60,22 @@ For **every milestone**, the cycle is:
 
 ## 3. The Milestones
 
-Order: **M0 → M1 → M2 → M3 → M4 → M5 → M6 (later)**.
+Order: **M0 → M1 → M2 → M2.5 → M3 → M4 → M5 → M6 (later)**.
+
+### Progress log (kept up to date)
+
+- **M0 — Routing foundation** — ✅ DONE, merged (PR #3).
+- **M1 — Addressable editor** — ✅ DONE, merged (PR #4).
+- **M2 — Reference / Collector mode** — ✅ DONE, merged (PR #5).
+- **Post-M2 fix — Reference robustness** — ✅ DONE, merged (PR #6). Two fixes:
+  1. `isReferenceMode` is now **reactive to the URL** (a `/view/` URL is always read-only; an `/editor/` URL is always the full editor → project switching works).
+  2. `init()` is now **URL-driven**: a `/view/` link (or `/editor/` deep-link) loads and displays the **project the URL names** from the cloud — fixing "view showed the default project + a stale workspace". This also delivered cross-project deep-linking (previously deferred) and made reference tabs truly read-only to shared storage.
+- **M2.5 — Reference-mode polish** — ⬜ NEXT (added from user feedback; see below).
+- **M3 → M6** — not started.
 
 ---
 
-### `[ ]` Milestone 0 — Routing Foundation (changes nothing you can see)
+### `[x]` Milestone 0 — Routing Foundation (changes nothing you can see) — ✅ DONE (PR #3)
 
 **Goal:** Put the link-handling plumbing in place so every link still lands in the editor exactly as today. Purely invisible groundwork.
 
@@ -94,7 +106,7 @@ Order: **M0 → M1 → M2 → M3 → M4 → M5 → M6 (later)**.
 
 ---
 
-### `[ ]` Milestone 1 — Addressable Editor (project + workspace in the link)
+### `[x]` Milestone 1 — Addressable Editor (project + workspace in the link) — ✅ DONE (PR #4)
 
 **Goal:** Give the editor real links that carry both the project and the workspace, so links open the right place and can later be opened in separate tabs.
 
@@ -136,7 +148,7 @@ Order: **M0 → M1 → M2 → M3 → M4 → M5 → M6 (later)**.
 
 ---
 
-### `[ ]` Milestone 2 — Reference / Collector Mode (read-only, but copyable)
+### `[x]` Milestone 2 — Reference / Collector Mode (read-only, but copyable) — ✅ DONE (PR #5 + robustness fix PR #6)
 
 **Goal:** A link that opens a workspace where you can pan, select, and copy — but cannot edit — and that **writes absolutely nothing**.
 
@@ -167,6 +179,43 @@ Order: **M0 → M1 → M2 → M3 → M4 → M5 → M6 (later)**.
 - You can select objects and **copy** them.
 - With developer tools watching, opening/using reference mode makes **no cloud writes** and changes **no** local sync bookkeeping.
 - Editor route entirely unaffected.
+
+**Approval:** `[ ]` **Approved**
+
+---
+
+### `[ ]` Milestone 2.5 — Reference-Mode Polish (from user feedback)
+
+**Goal:** Make reference mode convenient and clean: give the editor a one-click way to open a reference tab, remove the leftover write control from the reference top-bar menu, and let version history be *previewed* (read-only) from a reference tab.
+
+**Risk:** Low–Medium · **Depends on:** M2. **No data writes introduced.**
+
+- `[ ]` **2.5.1 — "View" button in the editor toolbar**
+  - *Why:* A reference tab can't switch projects (by design). So the natural flow is: switch to the project **in the editor**, then click **View** to open that project's current workspace in a **new tab** in reference mode. No more hand-editing URLs.
+  - *Strategy:* Add a small **View** button (editor only) that opens `#/view/<currentProject>/<currentWorkspace>` in a **new browser tab** (e.g. `window.open`). Purely a navigation convenience — writes nothing.
+  - *What could go wrong / be misunderstood:*
+    - Opening in the **same** tab (would turn the editor into a viewer) — it must open a **new** tab.
+    - Showing the button in reference tabs (it's editor-only).
+    - Building the link from stale state — use the currently displayed project + workspace.
+- `[ ]` **2.5.2 — Remove write controls from the "Data & sync" menu in reference tabs**
+  - *Why:* The top-bar "Data & sync" popover still shows **"Sync now"** in a `/view/` tab (see user screenshot). A read-only viewer must not offer a push-to-cloud action.
+  - *Strategy:* In reference tabs, **hide "Sync now"** (and any other write action) in that popover. Keep read-only items (device name display, and Version history — see 2.5.3). The handler is already guarded; this removes the misleading UI. Audit the popover for any other write buttons.
+  - *What could go wrong / be misunderstood:*
+    - Only hiding the *sidebar* sync button (already done) but forgetting **this popover** — the popover is a separate place.
+    - Hiding read-only info that's still useful (device name, sync status label).
+- `[ ]` **2.5.3 — Version history = read-only PREVIEW in reference tabs**
+  - *Why:* In a reference tab you want to *look at* an old version (like loading that version locally, just to preview it) — **without restoring** it (restore writes/overwrites).
+  - *Strategy:* Allow opening the Version history list and **loading a chosen snapshot into the current reference view in-memory only** (a temporary, read-only preview — no `restoreSnapshot`, no `createSnapshot`, no cloud/local writes). The **Restore** and **"Save a version now"** actions stay disabled/hidden in reference. Provide a clear "previewing version <date> — this is not your live data" indicator and a way back to the live view.
+  - *What could go wrong / be misunderstood:*
+    - Reusing `restoreSnapshot` (it WRITES + pushes) — preview must be a pure in-memory load of the snapshot payload, nothing else.
+    - Leaving the preview ambiguous with the live view — label it clearly.
+    - Persisting the previewed snapshot to localStorage/Firestore (must not).
+
+**Test Checklist (M2.5):**
+- Editor shows a **View** button; clicking it opens the current workspace in a **new tab** in reference mode; the editor tab is unaffected.
+- In a reference tab, the "Data & sync" popover has **no "Sync now"** (and no other write action); DevTools shows no writes.
+- In a reference tab, Version history can be opened and a past version **previewed** read-only; **Restore** / "Save a version now" are unavailable; no writes occur; returning to the live view works.
+- Editor tabs: View button aside, everything (including Sync now and full Version history/restore) behaves exactly as before.
 
 **Approval:** `[ ]` **Approved**
 
