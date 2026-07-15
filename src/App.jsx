@@ -867,30 +867,46 @@ export default function WorkflowApp() {
         let firestoreActiveId = null;
         let firestoreDefaultId = null;
         let hasVersionMismatch = false;
+        // When the URL names a real project (editor deep-link or /view/ reference),
+        // this holds that project id so we DISPLAY it (not the default). Stays null
+        // for a bare URL, preserving the original boot behavior.
+        let routeDisplayProjectId = null;
         if (isFirebaseConfigured()) {
           setSyncStatus('syncing');
           try {
             // Load from subcollection format (userMeta + project docs + workspace subcollections)
             const userMeta = await loadUserMeta();
             if (userMeta && userMeta.activeProjectId) {
-              const projectMeta = await loadProjectFromFirestore(userMeta.activeProjectId);
+              // Decide which project THIS tab opens. A URL that names a real
+              // project (editor deep-link or /view/ reference) drives which
+              // project's data we fetch AND which we display. A bare URL keeps
+              // the original behavior (load the stored active project).
+              const _bootIntent = parseRouteIntent(routeLocation.pathname);
+              let loadProjectId = userMeta.activeProjectId;
+              if (_bootIntent.projectId && _bootIntent.projectId !== userMeta.activeProjectId) {
+                const _routeProjMeta = await loadProjectFromFirestore(_bootIntent.projectId);
+                if (_routeProjMeta) { loadProjectId = _bootIntent.projectId; routeDisplayProjectId = _bootIntent.projectId; }
+              } else if (_bootIntent.projectId && _bootIntent.projectId === userMeta.activeProjectId) {
+                routeDisplayProjectId = userMeta.activeProjectId;
+              }
+              const projectMeta = await loadProjectFromFirestore(loadProjectId);
               if (projectMeta) {
-                // Load workspaces from subcollections (only for active project)
+                // Load workspaces from subcollections (only for the project this tab opens)
                 const workspaceIds = projectMeta.workspaceIds || [];
                 const loadedWorkspaces = [];
                 for (const wsId of workspaceIds) {
-                  const wsData = await loadWorkspaceFromFirestore(userMeta.activeProjectId, wsId);
+                  const wsData = await loadWorkspaceFromFirestore(loadProjectId, wsId);
                   if (wsData) loadedWorkspaces.push(wsData);
                 }
-                const tasksData = await loadTasksFromFirestore(userMeta.activeProjectId);
+                const tasksData = await loadTasksFromFirestore(loadProjectId);
 
                 // Load ALL projects from Firestore (not just the active one)
                 const allProjectsMap = await loadAllProjectsFromFirestore();
                 const allProjects = [];
                 if (allProjectsMap && allProjectsMap.size > 0) {
                   for (const [pid, pmeta] of allProjectsMap) {
-                    if (pid === userMeta.activeProjectId) {
-                      // For the active project, attach full workspace/task data
+                    if (pid === loadProjectId) {
+                      // For the opened project, attach full workspace/task data
                       allProjects.push({
                         ...pmeta,
                         id: pid,
@@ -910,10 +926,10 @@ export default function WorkflowApp() {
                     }
                   }
                 } else {
-                  // Fallback: if getDocs on projects collection failed, at least include active project
+                  // Fallback: if getDocs on projects collection failed, at least include the opened project
                   allProjects.push({
                     ...projectMeta,
-                    id: userMeta.activeProjectId,
+                    id: loadProjectId,
                     workspaces: loadedWorkspaces.length > 0 ? loadedWorkspaces : undefined,
                     tasks: tasksData ? (tasksData.tasks || []) : [],
                     taskGroups: tasksData ? (tasksData.taskGroups || []) : []
@@ -921,7 +937,7 @@ export default function WorkflowApp() {
                 }
 
                 firestoreProjects = allProjects;
-                firestoreActiveId = userMeta.activeProjectId;
+                firestoreActiveId = loadProjectId;
                 firestoreDefaultId = userMeta.defaultProjectId || userMeta.activeProjectId;
 
                 // --- SERVER-AUTHORITATIVE LOAD WITH DIRTY-EDIT PRESERVATION ---
@@ -931,9 +947,10 @@ export default function WorkflowApp() {
                 // is queued for the user. This both prevents losing unsynced edits
                 // on a refresh AND prevents a stale device from overwriting newer
                 // cloud data. We never discard the freshly-loaded Firestore data.
-                const _pid = userMeta.activeProjectId;
-                // Project metadata document
-                {
+                const _pid = loadProjectId;
+                // Project metadata document (skipped for read-only reference tabs,
+                // which never seed sync-state, write cache, or raise conflicts)
+                if (!isReferenceMode) {
                   const mPath = metaPath(_pid);
                   const st = getSyncState(mPath);
                   const serverRev = projectMeta.revision || 0;
@@ -944,7 +961,7 @@ export default function WorkflowApp() {
                   }
                 }
                 // Tasks document
-                if (tasksData) {
+                if (tasksData && !isReferenceMode) {
                   const tPath = tasksPath(_pid);
                   const st = getSyncState(tPath);
                   const serverRev = tasksData.revision || 0;
@@ -956,7 +973,7 @@ export default function WorkflowApp() {
                   }
                 }
                 // Active project's workspace documents (preserve dirty local bodies)
-                for (let i = 0; i < loadedWorkspaces.length; i++) {
+                for (let i = 0; !isReferenceMode && i < loadedWorkspaces.length; i++) {
                   const ws = loadedWorkspaces[i];
                   const path = wsPath(_pid, ws.id);
                   const st = getSyncState(path);
@@ -990,8 +1007,9 @@ export default function WorkflowApp() {
                     setSyncStatus('synced');
                   }
 
-                  // Hydrate localStorage with ALL project metadata from Firestore
-                  for (const proj of firestoreProjects) {
+                  // Hydrate localStorage with ALL project metadata from Firestore.
+                  // Reference tabs skip this - they must not write the shared cache.
+                  if (!isReferenceMode) for (const proj of firestoreProjects) {
                     const wsIds = (proj.workspaces || []).map(ws => ws.id);
                     // Preserve existing localStorage password hash (passwords are stored
                     // only in localStorage and intentionally stripped from Firestore)
@@ -1076,6 +1094,12 @@ export default function WorkflowApp() {
               loadedProjects = projectsArray;
               loadedActiveId = meta.activeProjectId;
               loadedDefaultId = meta.defaultProjectId || meta.activeProjectId;
+              // URL-driven display in degraded (localStorage-only) mode too: if the
+              // URL names a project we have locally, open it.
+              const _fbIntent = parseRouteIntent(routeLocation.pathname);
+              if (_fbIntent.projectId && projectsArray.some(p => p.id === _fbIntent.projectId)) {
+                routeDisplayProjectId = _fbIntent.projectId;
+              }
             }
           }
         }
@@ -1118,8 +1142,9 @@ export default function WorkflowApp() {
             return updated;
           });
 
-          // Persist field additions to per-workspace keys if needed
-          if (needsSave || migrationNeeded) {
+          // Persist field additions to per-workspace keys if needed.
+          // Reference tabs never write the shared cache (read-only).
+          if ((needsSave || migrationNeeded) && !isReferenceMode) {
             for (const proj of fullyMigrated) {
               const wsIds = (proj.workspaces || []).map(ws => ws.id);
               // Preserve existing localStorage password hash if the in-memory
@@ -1157,11 +1182,14 @@ export default function WorkflowApp() {
           }
           setDefaultProjectId(resolvedDefaultId);
 
-          // Save meta
-          saveMeta({ activeProjectId: resolvedDefaultId, defaultProjectId: resolvedDefaultId, schemaVersion: 2 });
-
-          // Always load the default project on page load
-          const activeId = resolvedDefaultId;
+          // This tab opens the URL's project when it named a real one; otherwise
+          // the default (original behavior). A reference tab must NOT write the
+          // shared active-project pointer (that would disrupt an editor tab on
+          // this same device).
+          const activeId = routeDisplayProjectId || resolvedDefaultId;
+          if (!isReferenceMode) {
+            saveMeta({ activeProjectId: activeId, defaultProjectId: resolvedDefaultId, schemaVersion: 2 });
+          }
           setActiveProjectId(activeId);
           const activeProj = fullyMigrated.find(p => p.id === activeId) || fullyMigrated[0];
           
@@ -6697,7 +6725,13 @@ export default function WorkflowApp() {
           <Eye className="w-4 h-4 shrink-0" />
           <span className="truncate">Reference view (read-only snapshot). Editing, saving, importing and switching are disabled here.</span>
           <button
-            onClick={() => { if (activeProjectId && activeTab) routeNavigate(buildEditorPath(activeProjectId, activeTab)); }}
+            onClick={() => {
+              if (!activeProjectId || !activeTab) return;
+              // Hard-navigate to the editor URL and reload so init() runs in
+              // editor mode with proper sync-state seeding (reference skips it).
+              window.location.hash = buildEditorPath(activeProjectId, activeTab);
+              window.location.reload();
+            }}
             className="shrink-0 px-2 py-1 rounded-md bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-colors"
             title="Open this workspace in the editor"
           >
