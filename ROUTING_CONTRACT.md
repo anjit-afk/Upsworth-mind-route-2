@@ -70,8 +70,23 @@ Order: **M0 → M1 → M2 → M2.5 → M3 → M4 → M5 → M6 (later)**.
 - **Post-M2 fix — Reference robustness** — ✅ DONE, merged (PR #6). Two fixes:
   1. `isReferenceMode` is now **reactive to the URL** (a `/view/` URL is always read-only; an `/editor/` URL is always the full editor → project switching works).
   2. `init()` is now **URL-driven**: a `/view/` link (or `/editor/` deep-link) loads and displays the **project the URL names** from the cloud — fixing "view showed the default project + a stale workspace". This also delivered cross-project deep-linking (previously deferred) and made reference tabs truly read-only to shared storage.
-- **M2.5 — Reference-mode polish** — ⬜ NEXT (added from user feedback; see below).
-- **M3 → M6** — not started.
+- **M2.5 — Reference-mode polish** — ✅ DONE, merged (PR #7): editor "View" button, "Sync now" hidden in the reference Data&sync menu, read-only version-history preview in reference tabs.
+- **M3 + M4 + M5** — ⚠️ **IMPLEMENTED but NOT merged — PR #8 white-screens at runtime.** The code builds and all references resolve, so it's a runtime error that still needs to be diagnosed from the browser console. `main` is unaffected (PR #8 not merged). **Do not merge PR #8 until the white screen is fixed.** See "Final status" below.
+- **M6 — Sharing (frozen duplicate)** — ⬜ NOT started.
+- **Cloud security rules** — ⬜ NOT started (separate, recommended task; the only *real* data-protection boundary).
+
+### Final status (work paused here at user's request)
+
+**Live app = `main` = through M2.5 (PR #7). Fully working.** The routing foundation is complete and in production:
+- Addressable editor links, reference/collector read-only mode, URL-driven project loading, the editor "View" button, and read-only version preview are all live and tested.
+
+**PR #8 (M3+M4+M5) is an unmerged, broken experiment** (white screen). It contains:
+- **M3** cross-tab copy/paste hardening (copy-only across tabs).
+- **M4** multi-tab presence registry + soft "N tabs" note + same-project red box in Pin/Task/Reminder panels + same-workspace editor warning.
+- **M5** global reminders in their own synced store (non-destructive migration).
+To resume: open PR #8's preview, read the browser console error (the red text), and fix the runtime cause — likely in the new M4 presence effect or M5 init/reminder logic. All three are data-safe by design (M4 writes nothing; M5 migration is non-destructive), so the fix is expected to be small.
+
+**Not yet built:** M6 (sharing), cloud security rules, and the future "decoy editor entrance" idea.
 
 ---
 
@@ -184,7 +199,7 @@ Order: **M0 → M1 → M2 → M2.5 → M3 → M4 → M5 → M6 (later)**.
 
 ---
 
-### `[ ]` Milestone 2.5 — Reference-Mode Polish (from user feedback)
+### `[x]` Milestone 2.5 — Reference-Mode Polish (from user feedback) — ✅ DONE (PR #7)
 
 **Goal:** Make reference mode convenient and clean: give the editor a one-click way to open a reference tab, remove the leftover write control from the reference top-bar menu, and let version history be *previewed* (read-only) from a reference tab.
 
@@ -221,7 +236,7 @@ Order: **M0 → M1 → M2 → M2.5 → M3 → M4 → M5 → M6 (later)**.
 
 ---
 
-### `[ ]` Milestone 3 — Cross-Tab Copy / Paste
+### `[~]` Milestone 3 — Cross-Tab Copy / Paste — ⚠️ implemented in PR #8 (white-screen, NOT merged)
 
 **Goal:** Copy in one browser tab (editor or reference) and paste into a workspace open in another tab.
 
@@ -250,7 +265,7 @@ Order: **M0 → M1 → M2 → M2.5 → M3 → M4 → M5 → M6 (later)**.
 
 ---
 
-### `[ ]` Milestone 4 — Multi-Tab Awareness & Guardrails
+### `[~]` Milestone 4 — Multi-Tab Awareness & Guardrails — ⚠️ implemented in PR #8 (white-screen, NOT merged; 4.3 built as a warning + one-click, not a silent auto-convert)
 
 **Goal:** Welcome multi-tab use, warn only when it actually matters, and steer you away from the risky case.
 
@@ -282,7 +297,7 @@ Order: **M0 → M1 → M2 → M2.5 → M3 → M4 → M5 → M6 (later)**.
 
 ---
 
-### `[ ]` Milestone 5 — Separate Reminders From the Project (the one storage change)
+### `[~]` Milestone 5 — Separate Reminders From the Project (the one storage change) — ⚠️ implemented in PR #8 (white-screen, NOT merged; migration is non-destructive)
 
 **Goal:** Move reminders out of the project's shared file into their own place, shrinking the multi-tab conflict surface. **Requires a backup export first.**
 
