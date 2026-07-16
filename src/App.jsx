@@ -57,6 +57,10 @@ import {
   loadTasksFromFirestore,
   saveUserMeta,
   loadUserMeta,
+  loadGlobalRemindersLocal,
+  saveGlobalRemindersLocal,
+  loadGlobalRemindersFromFirestore,
+  saveGlobalRemindersToFirestore,
   processRetryQueue,
   SCHEMA_VERSION,
   reconcileWorkspaceIds,
@@ -569,6 +573,9 @@ export default function WorkflowApp() {
   // data is not immediately re-uploaded / marked dirty.
   const taskAutosaveFirstRunRef = useRef(true);
   const metaAutosaveFirstRunRef = useRef(true);
+  // M5: global reminders live in their own store (not the project doc).
+  const reminderAutosaveFirstRunRef = useRef(true);
+  const reminderSaveTimerRef = useRef(null);
   // A human-readable data-freshness note shown after a return-check reload.
   const [freshnessToast, setFreshnessToast] = useState(null);
   // --- Phase 2 trust UI state ---
@@ -1248,8 +1255,32 @@ export default function WorkflowApp() {
           );
           setNextId(activeProj.nextId || 10);
 
-          // Load reminder data
-          const loadedReminders = activeProj.reminders || DEFAULT_REMINDERS;
+          // Load reminder data (Milestone 5: reminders are now a single GLOBAL
+          // set in their own store, not per-project). Prefer cloud, then local.
+          // If neither exists yet, migrate ONCE by merging every project's
+          // reminders (deduped by id) - the old per-project copies are kept
+          // intact as a backup and are simply no longer updated.
+          let globalReminders = null;
+          try { globalReminders = await loadGlobalRemindersFromFirestore(); } catch { globalReminders = null; }
+          if (globalReminders == null) globalReminders = loadGlobalRemindersLocal();
+          if (globalReminders == null) {
+            const seenRem = new Set();
+            const mergedRem = [];
+            for (const p of fullyMigrated) {
+              for (const r of (p.reminders || [])) {
+                if (!r) continue;
+                if (r.id == null) { mergedRem.push(r); continue; }
+                if (!seenRem.has(r.id)) { seenRem.add(r.id); mergedRem.push(r); }
+              }
+            }
+            globalReminders = mergedRem.length > 0 ? mergedRem : DEFAULT_REMINDERS;
+            // Persist the migrated set (editor tabs only; reference never writes).
+            if (!isReferenceMode) {
+              saveGlobalRemindersLocal(globalReminders);
+              if (isFirebaseConfigured()) saveGlobalRemindersToFirestore(globalReminders).catch(() => {});
+            }
+          }
+          const loadedReminders = globalReminders;
           setReminders(loadedReminders);
 
           // Load pin groups data
@@ -2188,13 +2219,16 @@ export default function WorkflowApp() {
     if (isPreviewMode) return; // No saves in Preview Mode
 
     // --- IMMEDIATE localStorage save ---
+    // M5: reminders are NO LONGER written here (they live in the global store).
+    // The `...projMeta` spread preserves any old per-project reminders as a
+    // harmless, no-longer-updated backup.
     const projMeta = loadProjectMeta(activeProjectId);
     if (projMeta) {
-      const updatedMeta = { ...projMeta, nextId, reminders, pinGroups, lastModified: Date.now() };
+      const updatedMeta = { ...projMeta, nextId, pinGroups, lastModified: Date.now() };
       saveProjectMeta(activeProjectId, updatedMeta);
     }
     setProjects(prev => prev.map(p => p.id === activeProjectId
-      ? { ...p, nextId, reminders, pinGroups, lastModified: Date.now() }
+      ? { ...p, nextId, pinGroups, lastModified: Date.now() }
       : p
     ));
 
@@ -2203,8 +2237,8 @@ export default function WorkflowApp() {
       metaAutosaveFirstRunRef.current = false;
       return;
     }
-    // Mark project metadata dirty (real user change to nextId/reminders/pinGroups).
-    markDirty(metaPath(activeProjectId), { nextId, reminders: reminders || [], pinGroups: pinGroups || [] });
+    // Mark project metadata dirty (real user change to nextId/pinGroups).
+    markDirty(metaPath(activeProjectId), { nextId, pinGroups: pinGroups || [] });
 
     // --- DEBOUNCED (3s) Firestore save ---
     if (isFirebaseConfigured() && firestoreLoadSucceededRef.current) {
@@ -2220,7 +2254,27 @@ export default function WorkflowApp() {
       });
     }
     return () => serverMetaSaverRef.current.cancel();
-  }, [nextId, reminders, pinGroups, initialized, activeProjectId]);
+  }, [nextId, pinGroups, initialized, activeProjectId]);
+
+  // (d) M5: Global reminder autosave - reminders are user-level, in their own
+  // store (localStorage: cm-reminders-global, Firestore: userMeta/reminders).
+  // Not tied to any project, so it does not ride the project conflict path.
+  useEffect(() => {
+    if (!initialized) return;
+    if (isPreviewMode) return; // reference/preview: never writes
+    // Skip the first post-init run so the freshly-loaded set is not re-written.
+    if (reminderAutosaveFirstRunRef.current) {
+      reminderAutosaveFirstRunRef.current = false;
+      return;
+    }
+    saveGlobalRemindersLocal(reminders); // immediate local
+    if (isFirebaseConfigured()) {
+      if (reminderSaveTimerRef.current) clearTimeout(reminderSaveTimerRef.current);
+      reminderSaveTimerRef.current = setTimeout(() => {
+        saveGlobalRemindersToFirestore(reminders).catch(() => {});
+      }, 800);
+    }
+  }, [reminders, initialized]);
 
   // Password save effect
   useEffect(() => {
@@ -2440,7 +2494,7 @@ export default function WorkflowApp() {
             setWorkspaces(targetWorkspaces);
             if (hydrated.activeTab) setActiveTab(hydrated.activeTab);
             if (hydrated.nextId) setNextId(hydrated.nextId);
-            if (hydrated.reminders) setReminders(hydrated.reminders);
+            // M5: reminders are global - not re-hydrated per project.
             if (hydrated.pinGroups) setPinGroups(hydrated.pinGroups);
             if (hydrated.tasks) setTasks(hydrated.tasks);
             if (hydrated.taskGroups) setTaskGroups(hydrated.taskGroups);
@@ -3946,7 +4000,7 @@ export default function WorkflowApp() {
     setWorkspaces(targetWorkspaces);
     setActiveTab((hydrated && hydrated.activeTab) || (targetWorkspaces.length > 0 ? targetWorkspaces[0].id : ''));
     setNextId((hydrated && hydrated.nextId) || 10);
-    setReminders((hydrated && hydrated.reminders) || DEFAULT_REMINDERS);
+    // M5: reminders are global (user-level) - do NOT reset them on project switch.
     setPinGroups((hydrated && hydrated.pinGroups) || []);
     setTasks(normalizeTasks(hydratedTasks));
     const switchedTaskGroups = hydratedTaskGroups.length > 0
@@ -4036,7 +4090,7 @@ export default function WorkflowApp() {
     setWorkspaces(targetWorkspaces);
     setActiveTab((hydrated && hydrated.activeTab) || (targetWorkspaces.length > 0 ? targetWorkspaces[0].id : ''));
     setNextId((hydrated && hydrated.nextId) || 10);
-    setReminders((hydrated && hydrated.reminders) || DEFAULT_REMINDERS);
+    // M5: reminders are global (user-level) - do NOT reset them on project switch.
     setPinGroups((hydrated && hydrated.pinGroups) || []);
     setTasks(normalizeTasks(hydratedTasks));
     const cycledTaskGroups = hydratedTaskGroups.length > 0

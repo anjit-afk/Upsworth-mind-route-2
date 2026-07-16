@@ -1229,6 +1229,62 @@ export async function loadUserMeta() {
 }
 
 // =============================================================================
+// GLOBAL REMINDERS (Milestone 5) - user-level, separate from any project
+// =============================================================================
+//
+// Reminders used to live inside each project's metadata. They are now a single
+// GLOBAL set stored in their OWN place, so they no longer ride on the project
+// document (which shrinks the multi-tab conflict surface) yet still sync across
+// devices. Storage:
+//   - localStorage: cm-reminders-global  -> { reminders: [...] }
+//   - Firestore:    userMeta/reminders   -> { reminders: [...], lastModified }
+// This is intentionally isolated from the project sync/conflict machinery.
+
+/** localStorage key for the global reminder set. */
+const KEY_REMINDERS_GLOBAL = 'cm-reminders-global';
+
+/** Read the global reminders from localStorage. Returns an array or null (never migrated). */
+export function loadGlobalRemindersLocal() {
+  try {
+    const raw = localStorage.getItem(KEY_REMINDERS_GLOBAL);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : (parsed && Array.isArray(parsed.reminders) ? parsed.reminders : null);
+  } catch { return null; }
+}
+
+/** Write the global reminders to localStorage. */
+export function saveGlobalRemindersLocal(reminders) {
+  try { localStorage.setItem(KEY_REMINDERS_GLOBAL, JSON.stringify({ reminders: reminders || [] })); } catch { /* ignore */ }
+}
+
+/** Load the global reminders from Firestore (userMeta/reminders). Returns an array or null. */
+export async function loadGlobalRemindersFromFirestore() {
+  if (!isFirebaseConfigured() || !db) return null;
+  try {
+    const docSnap = await getDoc(doc(db, 'userMeta', 'reminders'));
+    if (!docSnap.exists()) return null;
+    const data = docSnap.data();
+    return Array.isArray(data.reminders) ? data.reminders : [];
+  } catch (error) {
+    console.warn('[PersistenceService] Error loading global reminders:', error.message);
+    return null;
+  }
+}
+
+/** Save the global reminders to Firestore (userMeta/reminders). */
+export async function saveGlobalRemindersToFirestore(reminders) {
+  if (!isFirebaseConfigured() || !db) return false;
+  try {
+    await setDoc(doc(db, 'userMeta', 'reminders'), { reminders: reminders || [], lastModified: serverTimestamp() }, { merge: true });
+    return true;
+  } catch (error) {
+    console.warn('[PersistenceService] Error saving global reminders:', error.message);
+    return false;
+  }
+}
+
+// =============================================================================
 // INITIALIZATION
 // =============================================================================
 
