@@ -78,6 +78,7 @@ export default function FullTaskManager({
   panelWidthPct = 50,
   onSetPanelWidth,
   isPreviewMode = false,
+  multiTabProjectWarning = false,
 }) {
   const isPanel = mode === 'panel';
   const [searchQuery, setSearchQuery] = useState('');
@@ -347,6 +348,13 @@ export default function FullTaskManager({
     >
       {/* Resize handle (drag left edge) - panel mode only */}
       {isPanel && onSetPanelWidth && <PanelResizeHandle onChange={onSetPanelWidth} />}
+
+      {/* M4: same-project-open-in-another-tab warning */}
+      {multiTabProjectWarning && (
+        <div className="px-3 py-2 bg-red-50 border-b border-red-200 text-red-700 text-xs font-semibold shrink-0">
+          This project is open in another tab. To avoid losing task changes, it's safest to close the other tabs.
+        </div>
+      )}
 
       {/* Toolbar - compact single-row layout */}
       <div className="flex items-center gap-2 px-3 py-1.5 border-b border-slate-200 bg-slate-50 shrink-0">

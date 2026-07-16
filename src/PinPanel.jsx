@@ -53,6 +53,7 @@ export default function PinPanel({
   panelWidthPct = 40,
   onSetPanelWidth,
   isPreviewMode = false,
+  multiTabProjectWarning = false,
 }) {
   // --- State ---
   const [searchQuery, setSearchQuery] = useState('');
@@ -326,6 +327,13 @@ export default function PinPanel({
     >
       {/* Resize handle (drag left edge) */}
       {onSetPanelWidth && <PanelResizeHandle onChange={onSetPanelWidth} />}
+
+      {/* M4: same-project-open-in-another-tab warning */}
+      {multiTabProjectWarning && (
+        <div className="px-3 py-2 bg-red-50 border-b border-red-200 text-red-700 text-xs font-semibold shrink-0">
+          This project is open in another tab. To avoid losing pin/task changes, it's safest to close the other tabs.
+        </div>
+      )}
 
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-200 bg-slate-50 shrink-0">

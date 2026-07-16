@@ -691,6 +691,12 @@ export default function WorkflowApp() {
   // --- Header Notification Indicators ---
   const [isMultiTab, setIsMultiTab] = useState(false);
   const [showMultiTabTooltip, setShowMultiTabTooltip] = useState(false);
+  // M4: multi-tab awareness (derived from a BroadcastChannel presence registry)
+  const [openTabCount, setOpenTabCount] = useState(1);          // total tabs incl. this one
+  const [sameProjectTabCount, setSameProjectTabCount] = useState(0); // OTHER tabs on this project
+  const [sameWorkspaceEditorElsewhere, setSameWorkspaceEditorElsewhere] = useState(false); // another EDITOR tab on this exact workspace
+  const tabRegistryRef = useRef(new Map()); // tabId -> { projectId, workspaceId, mode, lastSeen }
+  const isReferenceModeRef = useRef(false);
   const [showExportBreath, setShowExportBreath] = useState(false);
   const exportBreathTimerRef = useRef(null);
   const broadcastChannelRef = useRef(null);
@@ -1852,86 +1858,81 @@ export default function WorkflowApp() {
   }, [timerNotification]);
 
   // --- Multi-Tab Detection via BroadcastChannel ---
+  // Keep reference-mode in a ref so the presence broadcaster (interval closure) reads it live.
+  useEffect(() => { isReferenceModeRef.current = isReferenceMode; }, [isReferenceMode]);
+
+  // --- M4: Multi-tab presence registry (BroadcastChannel) ---
+  // Each tab periodically announces { tabId, projectId, workspaceId, mode }. We
+  // keep a TTL'd registry of the OTHER tabs to derive: how many tabs are open,
+  // whether the SAME project is open elsewhere (shared task/pin-category risk),
+  // and whether the SAME workspace is open in another EDITOR (double-edit risk).
+  // This only READS presence and shows notices - it never writes app data.
   useEffect(() => {
-    let channel = null;
-    let heartbeatInterval = null;
-    let tabTimeout = null;
     const CHANNEL_NAME = 'thoughtflow-tab-presence';
+    const TTL = 9000;
+    const registry = tabRegistryRef.current;
+    let channel = null;
+    let hbInterval = null;
+
+    const myInfo = (extra) => ({
+      type: 'presence',
+      tabId: TAB_SESSION_ID,
+      projectId: activeProjectIdRef.current || null,
+      workspaceId: (stateRef.current && stateRef.current.activeTab) || null,
+      mode: isReferenceModeRef.current ? 'reference' : 'editor',
+      at: Date.now(),
+      ...(extra || {})
+    });
+
+    const recompute = () => {
+      const now = Date.now();
+      const myProj = activeProjectIdRef.current;
+      const myWs = stateRef.current && stateRef.current.activeTab;
+      let count = 1, sameProj = 0, sameWsEditor = false;
+      for (const [id, info] of registry) {
+        if (now - info.lastSeen > TTL) { registry.delete(id); continue; }
+        count++;
+        if (info.projectId && myProj && info.projectId === myProj) {
+          sameProj++;
+          if (info.mode === 'editor' && info.workspaceId && myWs && info.workspaceId === myWs) sameWsEditor = true;
+        }
+      }
+      setOpenTabCount(count);
+      setSameProjectTabCount(sameProj);
+      setIsMultiTab(count > 1);
+      setSameWorkspaceEditorElsewhere(!isReferenceModeRef.current && sameWsEditor);
+    };
+
+    const onMessage = (data) => {
+      if (!data || !data.tabId || data.tabId === TAB_SESSION_ID) return;
+      if (data.type === 'presence') {
+        registry.set(data.tabId, { projectId: data.projectId, workspaceId: data.workspaceId, mode: data.mode, lastSeen: Date.now() });
+        if (data.hello && channel) { try { channel.postMessage(myInfo()); } catch { /* ignore */ } } // answer new tabs fast
+        recompute();
+      } else if (data.type === 'leave') {
+        registry.delete(data.tabId);
+        recompute();
+      }
+    };
+
+    const handleBeforeUnload = () => { try { if (channel) channel.postMessage({ type: 'leave', tabId: TAB_SESSION_ID }); } catch { /* ignore */ } };
 
     try {
       channel = new BroadcastChannel(CHANNEL_NAME);
       broadcastChannelRef.current = channel;
-
-      // When we receive a message from another tab
-      channel.onmessage = (event) => {
-        if (event.data && event.data.type === 'presence') {
-          setIsMultiTab(true);
-          // Reset timeout - if no heartbeat for 10s, assume other tab closed
-          if (tabTimeout) clearTimeout(tabTimeout);
-          tabTimeout = setTimeout(() => setIsMultiTab(false), 10000);
-        } else if (event.data && event.data.type === 'leave') {
-          if (tabTimeout) clearTimeout(tabTimeout);
-          tabTimeout = setTimeout(() => setIsMultiTab(false), 2000);
-        }
-      };
-
-      // Broadcast our presence immediately and on interval
-      channel.postMessage({ type: 'presence' });
-      heartbeatInterval = setInterval(() => {
-        channel.postMessage({ type: 'presence' });
-      }, 4000);
-
-      // Send leave on tab close (beforeunload) so sibling clears warning immediately
-      const handleBeforeUnload = () => {
-        channel.postMessage({ type: 'leave' });
-      };
+      channel.onmessage = (e) => onMessage(e.data);
+      channel.postMessage(myInfo({ hello: true }));
+      hbInterval = setInterval(() => { try { channel.postMessage(myInfo()); } catch { /* ignore */ } recompute(); }, 3000);
       window.addEventListener('beforeunload', handleBeforeUnload);
-
       return () => {
-        if (heartbeatInterval) clearInterval(heartbeatInterval);
-        if (tabTimeout) clearTimeout(tabTimeout);
+        if (hbInterval) clearInterval(hbInterval);
         window.removeEventListener('beforeunload', handleBeforeUnload);
-        if (channel) {
-          channel.postMessage({ type: 'leave' });
-          channel.close();
-        }
+        try { channel.postMessage({ type: 'leave', tabId: TAB_SESSION_ID }); channel.close(); } catch { /* ignore */ }
       };
     } catch (e) {
-      // BroadcastChannel not supported, fallback to localStorage
-      const storageKey = 'thoughtflow-tab-id';
-      const myId = Date.now() + '-' + Math.random().toString(36).slice(2);
-      
-      const checkOtherTabs = () => {
-        const stored = localStorage.getItem(storageKey);
-        if (stored) {
-          try {
-            const parsed = JSON.parse(stored);
-            if (parsed.id !== myId && Date.now() - parsed.timestamp < 10000) {
-              setIsMultiTab(true);
-            } else {
-              setIsMultiTab(false);
-            }
-          } catch {
-            setIsMultiTab(false);
-          }
-        }
-      };
-
-      localStorage.setItem(storageKey, JSON.stringify({ id: myId, timestamp: Date.now() }));
-      heartbeatInterval = setInterval(() => {
-        localStorage.setItem(storageKey, JSON.stringify({ id: myId, timestamp: Date.now() }));
-        checkOtherTabs();
-      }, 4000);
-
-      const handleStorage = (e) => {
-        if (e.key === storageKey) checkOtherTabs();
-      };
-      window.addEventListener('storage', handleStorage);
-      
-      return () => {
-        clearInterval(heartbeatInterval);
-        window.removeEventListener('storage', handleStorage);
-      };
+      // BroadcastChannel unsupported (very rare) -> no cross-tab awareness. Safe no-op.
+      setOpenTabCount(1);
+      return () => {};
     }
   }, []);
 
@@ -6821,6 +6822,21 @@ export default function WorkflowApp() {
         </div>
       )}
 
+      {/* --- M4.3: same workspace open for editing in another tab (double-edit warning) --- */}
+      {!isReferenceMode && sameWorkspaceEditorElsewhere && (
+        <div className="shrink-0 flex items-center justify-center gap-2 sm:gap-3 px-3 py-1.5 bg-red-100 border-b border-red-300 text-red-900 text-xs sm:text-sm font-semibold z-[60]">
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          <span className="truncate">This workspace is being edited in another tab. Editing it in both can cause conflicts.</span>
+          <button
+            onClick={() => { if (activeProjectId && activeTab) routeNavigate(buildViewPath(activeProjectId, activeTab)); }}
+            className="shrink-0 px-2 py-1 rounded-md bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition-colors"
+            title="Switch this tab to a read-only view to avoid conflicts"
+          >
+            Open read-only view
+          </button>
+        </div>
+      )}
+
       {/* --- Top Command Toolbar --- */}
       <header className={`h-10 bg-white/50 backdrop-blur-sm border-b border-slate-200/80 flex items-center px-2 sm:px-3 z-50 justify-between shrink-0 gap-1 sm:gap-2 hover:bg-white/90 transition-all duration-300 ${isPreviewMode ? 'border-t-2 border-t-amber-400' : ''}`}>
         <div className="flex items-center gap-1.5 sm:gap-3 min-w-0 flex-1">
@@ -6879,20 +6895,20 @@ export default function WorkflowApp() {
           {isMultiTab && (
             <div className="relative">
               <div
-                className="flex items-center gap-1.5 px-1.5 sm:px-2 py-0.5 bg-amber-50 border border-amber-200 rounded-lg cursor-pointer"
+                className="flex items-center gap-1.5 px-1.5 sm:px-2 py-0.5 bg-slate-100 border border-slate-200 rounded-lg cursor-pointer"
                 onClick={() => setShowMultiTabTooltip((prev) => !prev)}
                 onMouseEnter={() => setShowMultiTabTooltip(true)}
                 onMouseLeave={() => setShowMultiTabTooltip(false)}
                 role="button"
-                aria-label="Multi-tab warning. Tap for details."
+                aria-label="Open in multiple tabs. Tap for details."
                 aria-expanded={showMultiTabTooltip}
               >
-                <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                <span className="hidden sm:inline text-xs font-medium text-amber-700 whitespace-nowrap">Open in another tab</span>
+                <Layers className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                <span className="hidden sm:inline text-xs font-medium text-slate-600 whitespace-nowrap">{openTabCount} tabs open</span>
               </div>
               {showMultiTabTooltip && (
-                <div className="absolute top-full left-0 mt-1 z-50 w-64 sm:w-72 p-2.5 bg-white border border-amber-200 rounded-lg shadow-lg text-xs text-slate-700 leading-relaxed">
-                  This canvas is currently open in another tab or window. To reduce the risk of data conflicts, refresh before starting work and export your data before leaving. For best reliability, work in only a single tab at a time and keep just one tab open per device.
+                <div className="absolute top-full left-0 mt-1 z-50 w-64 sm:w-72 p-2.5 bg-white border border-slate-200 rounded-lg shadow-lg text-xs text-slate-700 leading-relaxed">
+                  You have {openTabCount} tabs open. Different workspaces or projects in different tabs are fine. If you edit the <b>same project</b> in more than one tab, task/pin changes can conflict &mdash; it's safest to keep just one editing tab per project.
                 </div>
               )}
             </div>
@@ -8552,6 +8568,7 @@ export default function WorkflowApp() {
             panelWidthPct={panelWidthPct}
             onSetPanelWidth={setPanelWidthPct}
             isPreviewMode={isPreviewMode}
+            multiTabProjectWarning={sameProjectTabCount > 0}
           />
         )}
 
@@ -8583,6 +8600,7 @@ export default function WorkflowApp() {
             panelWidthPct={panelWidthPct}
             onSetPanelWidth={setPanelWidthPct}
             isPreviewMode={isPreviewMode}
+            multiTabProjectWarning={sameProjectTabCount > 0}
           />
         )}
 
@@ -8632,6 +8650,7 @@ export default function WorkflowApp() {
             panelWidthPct={panelWidthPct}
             onSetPanelWidth={setPanelWidthPct}
             isPreviewMode={isPreviewMode}
+            multiTabProjectWarning={sameProjectTabCount > 0}
           />
         )}
 
