@@ -7392,6 +7392,40 @@ export default function WorkflowApp() {
             </div>
           </div>
 
+          {/* Floating Selection Toolbar (Milestone 3): shows selection count + a
+              visible "Copy selected" action. Works in the editor AND in reference
+              (view) mode, where copying is allowed but editing is not — this is the
+              collector workflow (select in a viewer tab, paste into an editor tab). */}
+          {selectedNodeIds.length > 0 && (
+            <div
+              className="absolute bottom-4 left-1/2 -translate-x-1/2 z-[120]"
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-2 pl-3 pr-2 py-1.5 rounded-full bg-slate-900/90 border border-slate-600/60 shadow-xl backdrop-blur-sm">
+                <span className="text-xs font-semibold text-slate-200 whitespace-nowrap">
+                  {selectedNodeIds.length} selected
+                </span>
+                <button
+                  onClick={() => {
+                    copyMultiSelection(selectedNodeIds);
+                    showToast(`Copied ${selectedNodeIds.length} item${selectedNodeIds.length > 1 ? 's' : ''}`);
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-colors"
+                  title="Copy selected items to the clipboard"
+                >
+                  <Copy className="w-3.5 h-3.5" /> Copy selected
+                </button>
+                <button
+                  onClick={() => setSelectedNodeIds([])}
+                  className="flex items-center justify-center w-6 h-6 rounded-full hover:bg-slate-700 text-slate-300 transition-colors"
+                  title="Clear selection"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Canvas View Transform Layer */}
           <div 
             className="absolute top-0 left-0 w-full h-full pointer-events-none"
