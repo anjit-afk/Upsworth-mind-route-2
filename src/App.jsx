@@ -230,6 +230,20 @@ const THEMES = {
   }
 };
 
+// --- Per-tab session id (Milestone 3) ---
+// Unique per browser tab (the module is evaluated once per page load). The
+// clipboard lives in localStorage (shared across tabs on the same device), so
+// copy/paste already works cross-tab. We stamp each clipboard write with this id
+// so a "cut" is only honored as a MOVE within the SAME tab; a cut pasted in a
+// DIFFERENT tab is treated as a COPY (never deletes a source it can't safely
+// reach). This is the agreed "cross-tab transfer is copy-only" rule (decision #7).
+const TAB_SESSION_ID = (() => {
+  try {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+  } catch { /* ignore */ }
+  return `tab-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+})();
+
 // --- Password Hashing Helper ---
 const hashPassword = async (password) => {
   if (!password) return '';
@@ -2459,6 +2473,7 @@ export default function WorkflowApp() {
     const clipData = {
       node: { ...node, id: undefined },
       action: 'copy',
+      tabId: TAB_SESSION_ID,
       sourceWorkspaceId: activeTab,
       sourceNodeId: nodeId,
       timestamp: Date.now()
@@ -2474,6 +2489,7 @@ export default function WorkflowApp() {
     const clipData = {
       node: { ...node, id: undefined },
       action: 'cut',
+      tabId: TAB_SESSION_ID,
       sourceWorkspaceId: activeTab,
       sourceNodeId: nodeId,
       timestamp: Date.now()
@@ -2515,7 +2531,7 @@ export default function WorkflowApp() {
         workspaceId: activeTab
       };
 
-      if (clipData.action === 'cut') {
+      if (clipData.action === 'cut' && clipData.tabId === TAB_SESSION_ID) {
         // Atomic: paste + remove source in one setWorkspaces call
         setWorkspaces(prev => prev.map(ws => {
           if (ws.id === activeTab) {
@@ -2589,6 +2605,7 @@ export default function WorkflowApp() {
       nodes: nodeData.map(n => ({ ...n, x: n.x - originX, y: n.y - originY })),
       edges: edgeData,
       action: 'copy',
+      tabId: TAB_SESSION_ID,
       sourceWorkspaceId: activeTab,
       sourceGroupId: groupId,
       timestamp: Date.now()
@@ -2618,6 +2635,7 @@ export default function WorkflowApp() {
       nodes: nodeData.map(n => ({ ...n, x: n.x - originX, y: n.y - originY })),
       edges: edgeData,
       action: 'cut',
+      tabId: TAB_SESSION_ID,
       sourceWorkspaceId: activeTab,
       sourceGroupId: groupId,
       sourceGroupIds: allGroupIds,
@@ -2691,7 +2709,7 @@ export default function WorkflowApp() {
         workspaceId: activeTab
       }));
 
-      if (clipData.action === 'cut') {
+      if (clipData.action === 'cut' && clipData.tabId === TAB_SESSION_ID) {
         setWorkspaces(prev => prev.map(ws => {
           if (ws.id === activeTab) {
             let updatedNodes = [...ws.nodes, ...newNodes];
@@ -2814,6 +2832,7 @@ export default function WorkflowApp() {
       })),
       edges: allEdges,
       action: 'copy',
+      tabId: TAB_SESSION_ID,
       sourceWorkspaceId: activeTab,
       sourceNodeIds: allNodeIds,
       sourceGroupIds: allGroupIds,
@@ -2900,6 +2919,7 @@ export default function WorkflowApp() {
       })),
       edges: allEdges,
       action: 'cut',
+      tabId: TAB_SESSION_ID,
       sourceWorkspaceId: activeTab,
       sourceNodeIds: allNodeIds,
       sourceGroupIds: allGroupIds,
@@ -3013,7 +3033,7 @@ export default function WorkflowApp() {
       const newNodeIdSet = new Set(newNodes.map(n => n.id));
       const validEdges = newEdges.filter(e => newNodeIdSet.has(e.source) && newNodeIdSet.has(e.target));
 
-      if (clipData.action === 'cut') {
+      if (clipData.action === 'cut' && clipData.tabId === TAB_SESSION_ID) {
         setWorkspaces(prev => prev.map(ws => {
           if (ws.id === activeTab) {
             let updatedNodes = [...ws.nodes, ...newNodes];
