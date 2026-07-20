@@ -1,0 +1,407 @@
+/**
+ * Unified Animation System - Keyframes & Utility Classes
+ *
+ * NAMING CONVENTION:
+ * - Keyframes: anim-{action}-{direction}  (e.g., anim-fade-in, anim-scale-up)
+ * - Utility classes: .animate-{category}-{variant}  (e.g., .animate-modal-in, .animate-menu-out)
+ *
+ * PERFORMANCE RULES:
+ * - Only animate `transform` and `opacity` (GPU-composited, no layout thrashing)
+ * - Never animate width, height, margin, padding, top, left
+ * - Use will-change sparingly (only on elements that are about to animate)
+ */
+
+/* ==========================================================================
+   KEYFRAMES - Core building blocks
+   ========================================================================== */
+
+/* --- Fade --- */
+@keyframes anim-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes anim-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+/* --- Scale + Fade (Modals, Dialogs) --- */
+@keyframes anim-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes anim-scale-out {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+}
+
+/* --- Menu/Dropdown Pop (Scale + Fade + Slight Y offset) --- */
+@keyframes anim-menu-in {
+  from {
+    opacity: 0;
+    transform: scale(0.92) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes anim-menu-out {
+  from {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.95) translateY(-2px);
+  }
+}
+
+/* --- Slide from Right (Side Panels) --- */
+@keyframes anim-slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes anim-slide-out-right {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+}
+
+/* --- Slide from Left (Sidebar) --- */
+@keyframes anim-slide-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes anim-slide-out-left {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-24px);
+  }
+}
+
+/* --- Slide from Bottom (Toasts, Notifications) --- */
+@keyframes anim-slide-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes anim-slide-out-down {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+/* --- Slide from Top (Banners, Conflict warnings) --- */
+@keyframes anim-slide-in-down {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes anim-slide-out-up {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+
+/* --- Backdrop Fade --- */
+@keyframes anim-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes anim-backdrop-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+/* --- Content Reveal (for content appearing after load) --- */
+@keyframes anim-content-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* --- Notification Pop (slight overshoot) --- */
+@keyframes anim-pop-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.9) translateY(4px);
+  }
+  70% {
+    opacity: 1;
+    transform: scale(1.02) translateY(-1px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* --- Subtle Pulse (attention) --- */
+@keyframes anim-attention-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.02); }
+}
+
+
+/* ==========================================================================
+   UTILITY CLASSES - Applied to components
+   ========================================================================== */
+
+/* --- Modals & Dialogs --- */
+.animate-modal-in {
+  animation: anim-scale-in 200ms cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+.animate-modal-out {
+  animation: anim-scale-out 150ms cubic-bezier(0.36, 0, 0.66, -0.56) both;
+}
+
+/* --- Backdrop --- */
+.animate-backdrop-in {
+  animation: anim-backdrop-in 200ms cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+.animate-backdrop-out {
+  animation: anim-backdrop-out 150ms cubic-bezier(0.36, 0, 0.66, -0.56) both;
+}
+
+/* --- Menus & Dropdowns --- */
+.animate-menu-in {
+  animation: anim-menu-in 150ms cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+.animate-menu-out {
+  animation: anim-menu-out 100ms cubic-bezier(0.36, 0, 0.66, -0.56) both;
+}
+
+/* --- Side Panels (Right) --- */
+.animate-panel-in {
+  animation: anim-slide-in-right 250ms cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+.animate-panel-out {
+  animation: anim-slide-out-right 200ms cubic-bezier(0.36, 0, 0.66, -0.56) both;
+}
+
+/* --- Sidebar (Left) --- */
+.animate-sidebar-in {
+  animation: anim-slide-in-left 250ms cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+.animate-sidebar-out {
+  animation: anim-slide-out-left 200ms cubic-bezier(0.36, 0, 0.66, -0.56) both;
+}
+
+/* --- Toast / Notifications (from bottom) --- */
+.animate-toast-in {
+  animation: anim-pop-in 300ms cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+.animate-toast-out {
+  animation: anim-slide-out-down 200ms cubic-bezier(0.36, 0, 0.66, -0.56) both;
+}
+
+/* --- Banner / Conflict (from top) --- */
+.animate-banner-in {
+  animation: anim-slide-in-down 300ms cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+.animate-banner-out {
+  animation: anim-slide-out-up 200ms cubic-bezier(0.36, 0, 0.66, -0.56) both;
+}
+
+/* --- Content Reveal (workspace switch, list items) --- */
+.animate-content-in {
+  animation: anim-content-reveal 250ms cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+/* --- Fade only --- */
+.animate-fade-in {
+  animation: anim-fade-in 200ms cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+.animate-fade-out {
+  animation: anim-fade-out 150ms cubic-bezier(0.36, 0, 0.66, -0.56) both;
+}
+
+/* --- Attention pulse (for badges, indicators) --- */
+.animate-attention {
+  animation: anim-attention-pulse 2s ease-in-out infinite;
+}
+
+
+/* ==========================================================================
+   BUTTON PRESS FEEDBACK
+   Global press feedback for ALL interactive buttons.
+   Uses :active pseudo-class for instant (0ms latency) visual response.
+   Only animates transform (GPU-composited, no layout thrashing).
+   ========================================================================== */
+
+/* Global: every <button> gets subtle press feedback automatically */
+button {
+  transition: transform 50ms cubic-bezier(0.32, 0.72, 0, 1),
+              background-color 150ms ease,
+              box-shadow 150ms ease,
+              opacity 150ms ease;
+}
+
+button:active {
+  transform: scale(0.97);
+}
+
+/* Exclude buttons that are disabled, or being dragged, or have no visual role */
+button:disabled:active,
+button[aria-disabled="true"]:active {
+  transform: none;
+}
+
+/* Opt-in class for slightly stronger press (standalone action buttons) */
+.btn-press {
+  transition: transform 50ms cubic-bezier(0.32, 0.72, 0, 1), 
+              background-color 100ms ease,
+              box-shadow 100ms ease;
+}
+
+.btn-press:active {
+  transform: scale(0.95);
+}
+
+/* Smaller press for icon-only buttons (toolbar icons) */
+.btn-press-sm {
+  transition: transform 50ms cubic-bezier(0.32, 0.72, 0, 1), 
+              background-color 100ms ease;
+}
+
+.btn-press-sm:active {
+  transform: scale(0.92);
+}
+
+/* Links styled as buttons also get feedback */
+a[role="button"] {
+  transition: transform 50ms cubic-bezier(0.32, 0.72, 0, 1),
+              background-color 150ms ease;
+}
+
+a[role="button"]:active {
+  transform: scale(0.97);
+}
+
+
+/* ==========================================================================
+   ACCESSIBILITY - Reduced Motion
+   Users who prefer reduced motion get instant state changes with no animation
+   ========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-modal-in,
+  .animate-modal-out,
+  .animate-backdrop-in,
+  .animate-backdrop-out,
+  .animate-menu-in,
+  .animate-menu-out,
+  .animate-panel-in,
+  .animate-panel-out,
+  .animate-sidebar-in,
+  .animate-sidebar-out,
+  .animate-toast-in,
+  .animate-toast-out,
+  .animate-banner-in,
+  .animate-banner-out,
+  .animate-content-in,
+  .animate-fade-in,
+  .animate-fade-out,
+  .animate-attention {
+    animation: none !important;
+  }
+
+  .btn-press:active,
+  .btn-press-sm:active {
+    transform: none !important;
+  }
+
+  /* Disable global button press in reduced motion */
+  button:active,
+  a[role="button"]:active {
+    transform: none !important;
+  }
+
+  /* Still show elements that use animation for entry (they need to be visible) */
+  .animate-modal-in,
+  .animate-menu-in,
+  .animate-panel-in,
+  .animate-sidebar-in,
+  .animate-toast-in,
+  .animate-banner-in,
+  .animate-content-in,
+  .animate-fade-in {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}

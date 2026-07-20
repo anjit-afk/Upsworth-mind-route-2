@@ -60,14 +60,14 @@ export default function WorkspaceManager({
     <>
       {/* Backdrop */}
       <div
-        className="fixed inset-0 z-[500] bg-slate-900/60 backdrop-blur-sm"
+        className="fixed inset-0 z-[500] bg-slate-900/60 backdrop-blur-sm animate-backdrop-in"
         onClick={onClose}
       />
 
       {/* Modal */}
       <div className="fixed inset-0 z-[501] flex items-center justify-center pointer-events-none p-4">
         <div
-          className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg max-h-[80vh] flex flex-col pointer-events-auto animate-in fade-in zoom-in-95 duration-200"
+          className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg max-h-[80vh] flex flex-col pointer-events-auto animate-modal-in"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}

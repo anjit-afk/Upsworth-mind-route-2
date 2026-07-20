@@ -6421,7 +6421,7 @@ export default function WorkflowApp() {
               <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/60 border ${theme.tag}`}>{totalChildren} items</span>
               <button onClick={(e) => { e.stopPropagation(); setOpenColorPicker(openColorPicker === `ob-${group.id}` ? null : `ob-${group.id}`); }} className={`p-1.5 hover:bg-white/50 rounded-md transition-colors ${theme.text}`} title="Change theme"><Palette className="w-3.5 h-3.5" /></button>
               {openColorPicker === `ob-${group.id}` && (
-                <div className="absolute top-12 right-16 bg-white p-2 rounded-xl shadow-xl border border-slate-100 flex gap-1.5 z-50" onClick={(e) => e.stopPropagation()}>
+                <div className="absolute top-12 right-16 bg-white p-2 rounded-xl shadow-xl border border-slate-100 flex gap-1.5 z-50 animate-menu-in" onClick={(e) => e.stopPropagation()}>
                   {Object.keys(THEMES).map(colorKey => (
                     <button key={colorKey} onClick={() => { takeSnapshot(); updateGroup(group.id, { theme: colorKey }); setOpenColorPicker(null); }} className={`w-6 h-6 rounded-full flex items-center justify-center border-2 transition-transform hover:scale-110 ${THEMES[colorKey].port}`}>{group.theme === colorKey && <Check className="w-3 h-3 text-white" />}</button>
                   ))}
@@ -6477,9 +6477,9 @@ export default function WorkflowApp() {
     if (isGate) {
       return (
         <>
-          <div className={`fixed inset-0 ${zBg} bg-slate-900/40 backdrop-blur-sm`} onClick={() => setShowProjectPanel(false)} />
+          <div className={`fixed inset-0 ${zBg} bg-slate-900/40 backdrop-blur-sm animate-backdrop-in`} onClick={() => setShowProjectPanel(false)} />
           <div className={`fixed inset-0 ${zContent} flex items-center justify-center pointer-events-none`}>
-            <div className="bg-white rounded-xl shadow-xl border border-slate-200 p-6 w-full max-w-xs mx-4 pointer-events-auto">
+            <div className="bg-white rounded-xl shadow-xl border border-slate-200 p-6 w-full max-w-xs mx-4 pointer-events-auto animate-modal-in">
               {projectPanelMode === 'switch' ? (
                 <div className="space-y-3">
                   <div className="flex items-center justify-center mb-2">
@@ -6535,12 +6535,12 @@ export default function WorkflowApp() {
     // Full dashboard mode (non-gate)
     return (
       <>
-        <div className={`fixed inset-0 ${zBg} bg-slate-900/60 backdrop-blur-sm`} onClick={() => { setShowProjectPanel(false); setCardMenuOpenId(null); }} />
+        <div className={`fixed inset-0 ${zBg} bg-slate-900/60 backdrop-blur-sm animate-backdrop-in`} onClick={() => { setShowProjectPanel(false); setCardMenuOpenId(null); }} />
         <div className={`fixed inset-0 ${zContent} flex items-center justify-center pointer-events-none`}>
 
           {/* Dashboard Grid */}
           {projectPanelMode === 'dashboard' && (
-            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl mx-4 max-h-[80vh] flex flex-col pointer-events-auto">
+            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl mx-4 max-h-[80vh] flex flex-col pointer-events-auto animate-modal-in">
               <div className="flex items-center justify-between p-5 border-b border-slate-100">
                 <h2 className="text-lg font-bold text-slate-800">Projects</h2>
                 <div className="flex items-center gap-2">
@@ -6588,7 +6588,7 @@ export default function WorkflowApp() {
                             <MoreVertical className="w-3.5 h-3.5 text-slate-500" />
                           </button>
                           {cardMenuOpenId === p.id && (
-                            <div className="absolute top-8 right-0 bg-white rounded-lg shadow-lg border border-slate-200 py-1 min-w-[140px] z-10" onClick={(e) => e.stopPropagation()}>
+                            <div className="absolute top-8 right-0 bg-white rounded-lg shadow-lg border border-slate-200 py-1 min-w-[140px] z-10 animate-menu-in" onClick={(e) => e.stopPropagation()}>
                               <button onClick={() => { setEditingProjectId(p.id); setProjectNameInput(p.name); setProjectDescriptionInput(p.description || ''); setProjectThumbnailInput(p.thumbnail || null); setProjectPasswordEnabled(!!p.password); setProjectPasswordInput(''); setProjectDefaultToggle(p.id === defaultProjectId); setProjectError(''); setProjectPanelMode('edit'); setCardMenuOpenId(null); }} className="w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 transition-colors">Edit Project</button>
                               <button onClick={() => { duplicateProject(p.id); }} className="w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 transition-colors">Duplicate</button>
                               <button onClick={() => { exportSingleProject(p.id); }} className="w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 transition-colors">Export Project</button>
@@ -6606,7 +6606,7 @@ export default function WorkflowApp() {
 
           {/* Create/Edit Modal */}
           {(projectPanelMode === 'create' || projectPanelMode === 'edit') && (
-            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md mx-4 pointer-events-auto">
+            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md mx-4 pointer-events-auto animate-modal-in">
               <div className="p-5 border-b border-slate-100">
                 <h3 className="text-lg font-bold text-slate-800">{projectPanelMode === 'create' ? 'New Project' : 'Edit Project'}</h3>
               </div>
@@ -6662,7 +6662,7 @@ export default function WorkflowApp() {
 
           {/* Switch mode (password entry) */}
           {projectPanelMode === 'switch' && (
-            <div className="bg-white rounded-xl shadow-xl border border-slate-200 p-6 w-full max-w-xs mx-4 pointer-events-auto">
+            <div className="bg-white rounded-xl shadow-xl border border-slate-200 p-6 w-full max-w-xs mx-4 pointer-events-auto animate-modal-in">
               <div className="space-y-3">
                 <div className="flex items-center justify-center mb-2"><Lock className="w-5 h-5 text-slate-400" /></div>
                 <p className="text-sm text-slate-600 text-center">Enter password to switch project</p>
@@ -6676,7 +6676,7 @@ export default function WorkflowApp() {
 
           {/* Delete confirmation */}
           {projectPanelMode === 'delete' && (
-            <div className="bg-white rounded-xl shadow-xl border border-slate-200 p-6 w-full max-w-xs mx-4 pointer-events-auto">
+            <div className="bg-white rounded-xl shadow-xl border border-slate-200 p-6 w-full max-w-xs mx-4 pointer-events-auto animate-modal-in">
               <div className="space-y-3">
                 <div className="flex items-center justify-center mb-2"><Trash2 className="w-5 h-5 text-red-400" /></div>
                 <p className="text-sm text-slate-600 text-center">Delete &quot;{projects.find(p => p.id === selectedProjectId)?.name}&quot;?</p>
@@ -6692,7 +6692,7 @@ export default function WorkflowApp() {
 
           {/* Change Password mode */}
           {projectPanelMode === 'changePassword' && (
-            <div className="bg-white rounded-xl shadow-xl border border-slate-200 p-6 w-full max-w-xs mx-4 pointer-events-auto">
+            <div className="bg-white rounded-xl shadow-xl border border-slate-200 p-6 w-full max-w-xs mx-4 pointer-events-auto animate-modal-in">
               <div className="space-y-3">
                 <div className="flex items-center justify-center mb-2"><Lock className="w-5 h-5 text-slate-400" /></div>
                 {(() => { const current = projects.find(p => p.id === activeProjectId); return current && current.password; })() && (
@@ -6713,8 +6713,8 @@ export default function WorkflowApp() {
 
   if (passwordEnabled && !isAuthenticated) {
     return (
-      <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm">
-        <div className="bg-white rounded-2xl shadow-xl border border-slate-200 p-8 w-full max-w-sm mx-4">
+      <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm animate-backdrop-in">
+        <div className="bg-white rounded-2xl shadow-xl border border-slate-200 p-8 w-full max-w-sm mx-4 animate-modal-in">
           <div className="flex flex-col items-center mb-6">
             <div className="p-3 bg-indigo-50 rounded-xl mb-3">
               <Shield className="w-8 h-8 text-indigo-600" />
@@ -6842,7 +6842,7 @@ export default function WorkflowApp() {
             {showWorkspaceDropdown && (
               <>
                 <div className="fixed inset-0 z-[99]" onClick={() => setShowWorkspaceDropdown(false)}></div>
-                <div className="absolute top-full left-0 mt-2 w-56 sm:w-64 bg-white rounded-xl shadow-xl border border-slate-200 py-2 z-[100] max-w-[calc(100vw-2rem)]">
+                <div className="absolute top-full left-0 mt-2 w-56 sm:w-64 bg-white rounded-xl shadow-xl border border-slate-200 py-2 z-[100] max-w-[calc(100vw-2rem)] animate-menu-in">
                   {workspaces.map(ws => (
                     <button
                       key={ws.id}
@@ -6882,7 +6882,7 @@ export default function WorkflowApp() {
                 <span className="hidden sm:inline text-xs font-medium text-amber-700 whitespace-nowrap">Open in another tab</span>
               </div>
               {showMultiTabTooltip && (
-                <div className="absolute top-full left-0 mt-1 z-50 w-64 sm:w-72 p-2.5 bg-white border border-amber-200 rounded-lg shadow-lg text-xs text-slate-700 leading-relaxed">
+                <div className="absolute top-full left-0 mt-1 z-50 w-64 sm:w-72 p-2.5 bg-white border border-amber-200 rounded-lg shadow-lg text-xs text-slate-700 leading-relaxed animate-menu-in">
                   This canvas is currently open in another tab or window. To reduce the risk of data conflicts, refresh before starting work and export your data before leaving. For best reliability, work in only a single tab at a time and keep just one tab open per device.
                 </div>
               )}
@@ -6948,7 +6948,7 @@ export default function WorkflowApp() {
                 {showSyncPopover && (
                   <>
                     <div className="fixed inset-0 z-[199]" onClick={() => { setShowSyncPopover(false); setRenamingDevice(false); }} />
-                    <div className="absolute top-full right-0 mt-2 w-72 bg-white rounded-xl shadow-xl border border-slate-200 p-4 z-[200] max-w-[calc(100vw-1rem)]">
+                    <div className="absolute top-full right-0 mt-2 w-72 bg-white rounded-xl shadow-xl border border-slate-200 p-4 z-[200] max-w-[calc(100vw-1rem)] animate-menu-in">
                       <h3 className="text-sm font-bold text-slate-800 mb-3">Data & sync</h3>
                       <div className="space-y-2.5 text-xs">
                         {/* Cloud status */}
@@ -7107,7 +7107,7 @@ export default function WorkflowApp() {
           {showMoreMenu && (
             <>
             <div className="fixed inset-0 z-[99]" onClick={() => setShowMoreMenu(false)}></div>
-            <div className="absolute top-full right-0 mt-2 w-52 sm:w-56 bg-white rounded-xl shadow-xl border border-slate-200 py-2 z-[100] max-w-[calc(100vw-1rem)]">
+            <div className="absolute top-full right-0 mt-2 w-52 sm:w-56 bg-white rounded-xl shadow-xl border border-slate-200 py-2 z-[100] max-w-[calc(100vw-1rem)] animate-menu-in">
               {!isPreviewMode && (<>
               <button onClick={() => { disperseOverlappingNodes(); setShowMoreMenu(false); }} className="w-full flex items-center px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors">
                 <RefreshCw className="w-4 h-4 mr-2.5 text-indigo-500" /> Disperse Overlaps
@@ -7155,7 +7155,7 @@ export default function WorkflowApp() {
 
         {/* --- Left Sidebar --- */}
         {showSidebar && (
-          <aside className="w-[calc(100vw-3rem)] max-w-80 bg-white border-r border-slate-200 flex flex-col shrink-0 z-40 animate-in slide-in-from-left duration-200 fixed md:relative inset-y-0 left-0 top-10 md:top-0 shadow-xl md:shadow-none overflow-y-auto">
+          <aside className="w-[calc(100vw-3rem)] max-w-80 bg-white border-r border-slate-200 flex flex-col shrink-0 z-40 animate-sidebar-in fixed md:relative inset-y-0 left-0 top-10 md:top-0 shadow-xl md:shadow-none overflow-y-auto">
             <div className="p-4 border-b border-slate-100">
               <div className="flex flex-col gap-2">
                 <div className="flex items-center gap-2">
@@ -7348,7 +7348,7 @@ export default function WorkflowApp() {
           }} />
 
           {/* Floating Mode Indicator Badge */}
-          <div className="absolute bottom-4 left-4 z-[100] pointer-events-none">
+          <div className="absolute bottom-4 left-4 z-[100] pointer-events-none animate-fade-in">
             <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold shadow-lg border backdrop-blur-sm transition-all duration-200 ${
               isPreviewMode
                 ? 'bg-amber-900/80 border-amber-500/50 text-amber-200'
@@ -7531,7 +7531,7 @@ export default function WorkflowApp() {
                 const sourceTheme = THEMES[sourceThemeKey] || THEMES.blue;
 
                 return (
-                  <g key={edge.id} className="cursor-pointer group animate-in fade-in" onClick={(e) => { e.stopPropagation(); if ((e.ctrlKey || e.metaKey) && !isPreviewMode) { removeEdge(edge.id); } }} style={{ pointerEvents: 'auto' }} title="Ctrl+Click to disconnect">
+                  <g key={edge.id} className="cursor-pointer group animate-fade-in" onClick={(e) => { e.stopPropagation(); if ((e.ctrlKey || e.metaKey) && !isPreviewMode) { removeEdge(edge.id); } }} style={{ pointerEvents: 'auto' }} title="Ctrl+Click to disconnect">
                     <path d={drawCurve(startPos.x, startPos.y, endPos.x, endPos.y)} stroke="transparent" strokeWidth={24} fill="none" />
                     <path d={drawCurve(startPos.x, startPos.y, endPos.x, endPos.y)} stroke={sourceTheme.line} strokeWidth={3} fill="none" markerEnd={`url(#arrow-${sourceThemeKey})`} className="transition-all duration-300 group-hover:stroke-red-500 group-hover:stroke-[4px]" />
                   </g>
@@ -7847,7 +7847,7 @@ export default function WorkflowApp() {
                       <Link2 className="w-3 h-3" />
                     </button>
                     {openLinkPicker === node.id && (
-                      <div className="absolute top-8 right-0 bg-white p-2 rounded-xl shadow-xl border border-slate-100 flex flex-col gap-1 z-50 pointer-events-auto min-w-[150px]" onClick={(e) => e.stopPropagation()}>
+                      <div className="absolute top-8 right-0 bg-white p-2 rounded-xl shadow-xl border border-slate-100 flex flex-col gap-1 z-50 pointer-events-auto min-w-[150px] animate-menu-in" onClick={(e) => e.stopPropagation()}>
                         <span className="text-[9px] font-bold text-slate-400 px-2 py-1 uppercase tracking-wider">Tab Portal Link:</span>
                         <button onClick={() => { takeSnapshot(); updateNode(node.id, { linkToTab: null }); setOpenLinkPicker(null); }} className="w-full text-left px-2 py-1 text-xs font-semibold rounded hover:bg-slate-100 text-red-500">Disconnect Portal</button>
                         {workspaces.map(ws => (
@@ -7860,7 +7860,7 @@ export default function WorkflowApp() {
                     )}
                     <button onClick={(e) => { e.stopPropagation(); setOpenColorPicker(openColorPicker === node.id ? null : node.id); setOpenLinkPicker(null); }} className="p-1 hover:bg-slate-100 rounded text-slate-500" title="Theme"><Palette className="w-3 h-3"/></button>
                     {openColorPicker === node.id && (
-                      <div className="absolute top-8 right-0 bg-white p-2 rounded-xl shadow-xl border border-slate-100 flex gap-1.5 z-50 pointer-events-auto" onClick={(e) => e.stopPropagation()}>
+                      <div className="absolute top-8 right-0 bg-white p-2 rounded-xl shadow-xl border border-slate-100 flex gap-1.5 z-50 pointer-events-auto animate-menu-in" onClick={(e) => e.stopPropagation()}>
                         {Object.keys(THEMES).map(colorKey => (
                           <button key={colorKey} onClick={() => { takeSnapshot(); updateNode(node.id, { theme: colorKey }); setOpenColorPicker(null); }} className={`w-6 h-6 rounded-full flex items-center justify-center border-2 transition-transform hover:scale-110 ${THEMES[colorKey].port}`}>
                             {node.theme === colorKey && <Check className="w-3 h-3 text-white" />}
@@ -7995,7 +7995,7 @@ export default function WorkflowApp() {
 
             {/* Timer Panel - absolutely positioned above toolbar */}
             {showTimer && (
-              <div className={`absolute bottom-full right-0 mb-2 bg-white/95 backdrop-blur-sm rounded-xl shadow-lg border border-slate-200 p-3 min-w-[200px] ${timerDone ? 'animate-pulse ring-2 ring-orange-400' : ''}`}>
+              <div className={`absolute bottom-full right-0 mb-2 bg-white/95 backdrop-blur-sm rounded-xl shadow-lg border border-slate-200 p-3 min-w-[200px] animate-menu-in ${timerDone ? 'animate-pulse ring-2 ring-orange-400' : ''}`}>
                 {/* Timer Display */}
                 <div className="text-center mb-2">
                   <span className={`text-2xl font-bold font-mono ${timerDone ? 'text-orange-600' : timerRunning ? 'text-indigo-700' : 'text-slate-700'}`}>
@@ -8099,7 +8099,7 @@ export default function WorkflowApp() {
           {/* --- Canvas Background Context Menu --- */}
           {contextMenu && (
             <div 
-              className="absolute z-[200] bg-white border border-slate-200 rounded-xl shadow-xl py-2 min-w-[200px] animate-in fade-in zoom-in-95 duration-100"
+              className="absolute z-[200] bg-white border border-slate-200 rounded-xl shadow-xl py-2 min-w-[200px] animate-menu-in"
               style={{ left: contextMenu.x, top: contextMenu.y }}
               onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => e.stopPropagation()}
@@ -8156,7 +8156,7 @@ export default function WorkflowApp() {
           {/* --- Card Specific Context Menu --- */}
           {nodeContextMenu && (
             <div 
-              className="absolute z-[200] bg-white border border-slate-200 rounded-xl shadow-xl py-2 min-w-[180px] animate-in fade-in zoom-in-95 duration-100"
+              className="absolute z-[200] bg-white border border-slate-200 rounded-xl shadow-xl py-2 min-w-[180px] animate-menu-in"
               style={{ left: nodeContextMenu.x, top: nodeContextMenu.y }}
               onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => e.stopPropagation()}
@@ -8221,7 +8221,7 @@ export default function WorkflowApp() {
           {/* --- Group Context Menu --- */}
           {groupContextMenu && (
             <div 
-              className="absolute z-[200] bg-white border border-slate-200 rounded-xl shadow-xl py-2 min-w-[180px] animate-in fade-in zoom-in-95 duration-100"
+              className="absolute z-[200] bg-white border border-slate-200 rounded-xl shadow-xl py-2 min-w-[180px] animate-menu-in"
               style={{ left: groupContextMenu.x, top: groupContextMenu.y }}
               onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => e.stopPropagation()}
@@ -8278,7 +8278,7 @@ export default function WorkflowApp() {
                 onPointerDown={(e) => { if (e.target === e.currentTarget) setEditingPinOnCanvas(null); }}
               >
                 <div
-                  className="absolute bg-white border border-slate-200 rounded-xl shadow-2xl p-3 min-w-[220px]"
+                  className="absolute bg-white border border-slate-200 rounded-xl shadow-2xl p-3 min-w-[220px] animate-menu-in"
                   style={{ left: popoverLeft, top: popoverTop, transform: 'translateX(-50%)' }}
                   onClick={(e) => e.stopPropagation()}
                   onPointerDown={(e) => e.stopPropagation()}
@@ -8365,7 +8365,7 @@ export default function WorkflowApp() {
           return (
             <>
               {/* Panel B: Clone List */}
-              <div className="w-[250px] shrink-0 bg-[#16213e] border-l border-slate-700/50 flex flex-col overflow-hidden transition-all duration-300">
+              <div className="w-[250px] shrink-0 bg-[#16213e] border-l border-slate-700/50 flex flex-col overflow-hidden animate-panel-in">
                 <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700/50">
                   <h3 className="text-sm font-bold text-slate-200">Clone Nodes</h3>
                   <button onClick={() => { setShowClonePanel(false); setSelectedCloneSourceId(null); }} className="p-1 hover:bg-slate-700/50 rounded text-slate-400 hover:text-slate-200 transition-colors">
@@ -8397,7 +8397,7 @@ export default function WorkflowApp() {
               </div>
 
               {/* Panel C: Clone Locations */}
-              <div className="w-[350px] shrink-0 bg-[#0f3460] border-l border-slate-700/50 flex flex-col overflow-hidden transition-all duration-300">
+              <div className="w-[350px] shrink-0 bg-[#0f3460] border-l border-slate-700/50 flex flex-col overflow-hidden animate-panel-in" style={{ animationDelay: '50ms' }}>
                 <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700/50">
                   <h3 className="text-sm font-bold text-slate-200">Clone Locations</h3>
                 </div>
@@ -8505,6 +8505,7 @@ export default function WorkflowApp() {
 
         {/* --- Pin Panel --- */}
         {showPinPanel && viewMode === 'canvas' && (
+          <div className="animate-panel-in">
           <PinPanel
             workspaces={workspaces}
             activeTab={activeTab}
@@ -8522,10 +8523,12 @@ export default function WorkflowApp() {
             onSetPanelWidth={setPanelWidthPct}
             isPreviewMode={isPreviewMode}
           />
+          </div>
         )}
 
         {/* --- Reminder Panel --- */}
         {showReminderPanel && viewMode === 'canvas' && (
+          <div className="animate-panel-in">
           <ReminderPanel
             reminders={reminders}
             showPanel={showReminderPanel}
@@ -8553,10 +8556,12 @@ export default function WorkflowApp() {
             onSetPanelWidth={setPanelWidthPct}
             isPreviewMode={isPreviewMode}
           />
+          </div>
         )}
 
         {/* --- Card Editor Panel --- */}
         {showCardEditorPanel && viewMode === 'canvas' && (
+          <div className="animate-panel-in">
           <CardEditorPanel
             selectedNode={cardEditorNode}
             onUpdateNode={(updates) => {
@@ -8571,10 +8576,12 @@ export default function WorkflowApp() {
             isPreviewMode={isPreviewMode}
             isArrangeMode={isArrangeMode}
           />
+          </div>
         )}
 
         {/* --- Full Task Manager (side panel / fullscreen) --- */}
         {taskPanelMode !== 'closed' && (
+          <div className="animate-panel-in">
           <FullTaskManager
             tasks={tasks}
             showPanel={true}
@@ -8602,11 +8609,12 @@ export default function WorkflowApp() {
             onSetPanelWidth={setPanelWidthPct}
             isPreviewMode={isPreviewMode}
           />
+          </div>
         )}
 
         {/* --- Outline Backlog Board View --- */}
         {viewMode === 'outline' && (
-          <div className="flex-1 overflow-hidden flex flex-col bg-slate-50">
+          <div className="flex-1 overflow-hidden flex flex-col bg-slate-50 animate-content-in">
             <div className="px-3 sm:px-6 py-3 bg-white border-b border-slate-200 flex items-center justify-between shrink-0 gap-2">
               <div className="min-w-0">
                 <h2 className="text-xs sm:text-sm font-bold text-slate-800 truncate">Outline Backlog Board</h2>
@@ -8631,8 +8639,8 @@ export default function WorkflowApp() {
 
       {/* --- Modals and Dialogues --- */}
       {showConfirmClear && (
-        <div className="absolute inset-0 bg-slate-900/40 z-[100] flex items-center justify-center backdrop-blur-sm">
-          <div className="bg-white p-6 rounded-2xl shadow-2xl max-w-sm w-full mx-4 border border-slate-100 animate-in fade-in zoom-in-95 duration-200">
+        <div className="absolute inset-0 bg-slate-900/40 z-[100] flex items-center justify-center backdrop-blur-sm animate-backdrop-in">
+          <div className="bg-white p-6 rounded-2xl shadow-2xl max-w-sm w-full mx-4 border border-slate-100 animate-modal-in">
             <h3 className="text-lg font-bold text-slate-800 mb-1">Clear Current Canvas?</h3>
             <p className="text-slate-500 mb-6 text-xs leading-relaxed">This will permanently delete all nodes, groups and connections inside "{activeWs.name}".</p>
             <div className="flex justify-end gap-3">
@@ -8644,8 +8652,8 @@ export default function WorkflowApp() {
       )}
 
       {errorMessage && (
-        <div className="absolute inset-0 bg-slate-900/40 z-[100] flex items-center justify-center backdrop-blur-sm">
-          <div className="bg-white p-6 rounded-2xl shadow-2xl max-w-sm w-full mx-4 border border-slate-100 animate-in fade-in zoom-in-95 duration-200">
+        <div className="absolute inset-0 bg-slate-900/40 z-[100] flex items-center justify-center backdrop-blur-sm animate-backdrop-in">
+          <div className="bg-white p-6 rounded-2xl shadow-2xl max-w-sm w-full mx-4 border border-slate-100 animate-modal-in">
             <h3 className="text-lg font-bold text-red-600 mb-1">Upload Issue</h3>
             <p className="text-slate-500 mb-6 text-xs leading-relaxed">{errorMessage}</p>
             <div className="flex justify-end">
@@ -8657,8 +8665,8 @@ export default function WorkflowApp() {
 
       {/* --- First-run device name picker --- */}
       {showDevicePicker && (
-        <div className="fixed inset-0 z-[400] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm">
-          <div className="bg-white p-6 rounded-2xl shadow-2xl max-w-sm w-full mx-4 border border-slate-100">
+        <div className="fixed inset-0 z-[400] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm animate-backdrop-in">
+          <div className="bg-white p-6 rounded-2xl shadow-2xl max-w-sm w-full mx-4 border border-slate-100 animate-modal-in">
             <h3 className="text-lg font-bold text-slate-800 mb-1">Which device is this?</h3>
             <p className="text-slate-500 mb-4 text-xs leading-relaxed">We label your saved versions with the device name (e.g. "edited on Laptop"). This is stored on this device only.</p>
             <div className="grid grid-cols-2 gap-2 mb-3">
@@ -8681,7 +8689,7 @@ export default function WorkflowApp() {
         const who = (c.serverData && c.serverData.lastEditedByDevice) || 'another device';
         return (
           <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[400] w-[92%] max-w-md">
-            <div className="bg-white rounded-2xl shadow-2xl border border-amber-200 p-4 animate-in fade-in slide-in-from-top-2 duration-200">
+            <div className="bg-white rounded-2xl shadow-2xl border border-amber-200 p-4 animate-banner-in">
               <div className="flex items-start gap-3">
                 <div className="text-amber-500 text-xl leading-none mt-0.5">⚠</div>
                 <div className="flex-1">
@@ -8700,7 +8708,7 @@ export default function WorkflowApp() {
 
       {/* --- Return-from-idle freshness toast --- */}
       {freshnessToast && (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[390] animate-in fade-in slide-in-from-bottom-2 duration-200">
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[390] animate-toast-in">
           <div className="bg-slate-800 text-white text-xs rounded-full px-4 py-2 shadow-lg flex items-center gap-2">
             <span>{freshnessToast.reason === 'restored' ? '↺ Restored an earlier version' : `↻ Loaded the latest from the cloud (edited on ${freshnessToast.device})`}</span>
             <button onClick={() => setFreshnessToast(null)} className="text-slate-300 hover:text-white font-bold">×</button>
@@ -8710,8 +8718,8 @@ export default function WorkflowApp() {
 
       {/* --- Version history panel (Phase 3) --- */}
       {showHistory && (
-        <div className="fixed inset-0 z-[410] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4" onClick={() => { if (!historyBusy) { setShowHistory(false); setConfirmRestoreId(null); } }}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col border border-slate-100" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 z-[410] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-backdrop-in" onClick={() => { if (!historyBusy) { setShowHistory(false); setConfirmRestoreId(null); } }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col border border-slate-100 animate-modal-in" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between p-4 border-b border-slate-100">
               <div>
                 <h3 className="text-base font-bold text-slate-800">Version history</h3>
@@ -8793,9 +8801,9 @@ export default function WorkflowApp() {
         const sheetTheme = THEMES[sheetNode.theme] || THEMES.blue;
         return (
           <div className="fixed inset-0 z-[300] flex flex-col justify-end" onClick={() => setMobileSheet(null)}>
-            <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" />
+            <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm animate-backdrop-in" />
             <div
-              className="relative bg-white rounded-t-3xl shadow-2xl border-t border-slate-200 animate-in slide-in-from-bottom duration-300 pb-safe"
+              className="relative bg-white rounded-t-3xl shadow-2xl border-t border-slate-200 animate-modal-in pb-safe"
               onClick={(e) => e.stopPropagation()}
               style={{ paddingBottom: 'env(safe-area-inset-bottom, 16px)' }}
             >
@@ -8845,7 +8853,7 @@ export default function WorkflowApp() {
 
       {/* --- Multi-Select Floating Action Bar --- */}
       {selectedNodeIds.length > 0 && !isPreviewMode && (
-        <div ref={selectionMenuRef} className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-[80] flex flex-col items-center transition-opacity ${selectionMenuOpen ? 'opacity-100' : 'opacity-50 hover:opacity-75'}`}>
+        <div ref={selectionMenuRef} className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-[80] flex flex-col items-center transition-opacity animate-toast-in ${selectionMenuOpen ? 'opacity-100' : 'opacity-50 hover:opacity-75'}`}>
           {selectionMenuOpen && (
             <div className="mb-2 bg-white rounded-xl shadow-xl border border-slate-200 p-2 flex flex-col gap-1 min-w-[180px]">
               <button onClick={() => { if (isPreviewMode) return; takeSnapshot(); const deletedImages = (activeWs?.images || []).filter(img => selectedNodeIds.includes(img.id)); const deletedImageIds = deletedImages.map(img => img.id); updateActiveWorkspace(ws => { const filtered = ws.nodes.filter(n => !selectedNodeIds.includes(n.id)); const filteredGroups = ws.groups.filter(g => !selectedNodeIds.includes(g.id)); const filteredImages = (ws.images || []).filter(img => !selectedNodeIds.includes(img.id)); const filteredEdges = ws.edges.filter(e => !selectedNodeIds.includes(e.source) && !selectedNodeIds.includes(e.target)); return { nodes: filtered, edges: filteredEdges, groups: computeLayout(filteredGroups, filtered), images: filteredImages }; }); if (deletedImageIds.length > 0) { const allWorkspaces = stateRef.current.workspaces || []; const safeToDeleteIds = deletedImages.filter(delImg => { if (!delImg.url) return false; return !allWorkspaces.some(ws => (ws.images || []).some(img => img.id !== delImg.id && img.url === delImg.url)); }).map(img => img.id); if (safeToDeleteIds.length > 0) { deleteWorkspaceImages(activeProjectId, activeTab, safeToDeleteIds); } } setSelectedNodeIds([]); setSelectionMenuOpen(false); }} className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 rounded-lg transition-colors w-full text-left">
@@ -8960,14 +8968,14 @@ export default function WorkflowApp() {
 
       {/* --- Toast Notification --- */}
       {toastMessage && (
-        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[90] px-4 py-2 bg-slate-800 text-white text-sm font-medium rounded-full shadow-lg animate-in fade-in duration-200">
+        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[90] px-4 py-2 bg-slate-800 text-white text-sm font-medium rounded-full shadow-lg animate-toast-in">
           {toastMessage}
         </div>
       )}
 
       {/* --- Timer Complete Notification --- */}
       {timerNotification && (
-        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[90] animate-in slide-in-from-top fade-in duration-300">
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[90] animate-banner-in">
           <div className="bg-white/95 backdrop-blur-md rounded-xl shadow-xl border border-orange-200 px-4 py-3 flex items-center gap-3">
             <span className="text-xl">⏰</span>
             <span className="text-sm font-semibold text-orange-700">Timer Complete!</span>
@@ -8983,7 +8991,7 @@ export default function WorkflowApp() {
 
       {/* --- Reminder Notification Toast --- */}
       {activeReminderNotification && (
-        <div className="fixed bottom-28 left-1/2 -translate-x-1/2 z-[85] animate-in slide-in-from-bottom fade-in duration-300 max-w-sm w-full mx-4">
+        <div className="fixed bottom-28 left-1/2 -translate-x-1/2 z-[85] animate-toast-in max-w-sm w-full mx-4">
           <div className="bg-white/95 backdrop-blur-md rounded-xl shadow-xl border border-slate-200 px-4 py-3 flex items-start gap-3">
             <span className="text-2xl shrink-0">{activeReminderNotification.icon}</span>
             <div className="flex-1 min-w-0">
@@ -9003,9 +9011,9 @@ export default function WorkflowApp() {
       {/* --- Partial Import Placement Dialog --- */}
       {showPartialImportDialog && partialImportData && (
         <>
-          <div className="fixed inset-0 z-[200] bg-slate-900/60 backdrop-blur-sm" onClick={() => { setShowPartialImportDialog(false); setPartialImportData(null); }} />
+          <div className="fixed inset-0 z-[200] bg-slate-900/60 backdrop-blur-sm animate-backdrop-in" onClick={() => { setShowPartialImportDialog(false); setPartialImportData(null); }} />
           <div className="fixed inset-0 z-[201] flex items-center justify-center pointer-events-none">
-            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md mx-4 pointer-events-auto">
+            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md mx-4 pointer-events-auto animate-modal-in">
               <div className="flex items-center justify-between p-5 border-b border-slate-100">
                 <h2 className="text-lg font-bold text-slate-800">Import Partial Map</h2>
                 <button onClick={() => { setShowPartialImportDialog(false); setPartialImportData(null); }} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">
