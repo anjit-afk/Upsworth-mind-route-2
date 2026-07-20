@@ -9,7 +9,7 @@ import {
   MoreVertical, ImageIcon, ChevronUp, Scissors, ClipboardPaste,
   Lock, Shield, Eye, EyeOff, GitBranch, Map, Timer,
   MapPin, Bell, Pencil, MousePointer, ListTodo, Cloud, CloudOff, Loader,
-  AlertTriangle
+  AlertTriangle, Settings
 } from 'lucide-react';
 import MiniMap from './MiniMap';
 import PinPanel, { PIN_ICONS } from './PinPanel';
@@ -19,6 +19,7 @@ import { GROUP_COLORS } from './taskConstants';
 import { clampPanelPct, DEFAULT_PANEL_PCT } from './PanelResize';
 import MarkdownRenderer from './MarkdownRenderer';
 import CardEditorPanel from './CardEditorPanel';
+import WorkspaceManager from './WorkspaceManager';
 import { parseRouteIntent, buildEditorPath, buildViewPath } from './routing/useRouteIntent';
 import { isFirebaseConfigured } from './firebase';
 import { validateWorkspaces } from './workspaceValidator';
@@ -467,6 +468,7 @@ export default function WorkflowApp() {
   const [showSidebar, setShowSidebar] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [showWorkspaceDropdown, setShowWorkspaceDropdown] = useState(false);
+  const [showWorkspaceManager, setShowWorkspaceManager] = useState(false);
 
   // --- Dragging & Resizing Interactions ---
   const [draggingNode, setDraggingNode] = useState(null);
@@ -1994,17 +1996,20 @@ export default function WorkflowApp() {
   //   (a) Immediately saves to localStorage on every state change (no debounce)
   //   (b) Schedules a 3-second debounced Firestore save via serverSaver refs
   //
-  // (a) Workspace autosave: watches [workspaces, activeTab]
-  // NOTE (stale closure risk): switchProject/cycleToProject explicitly persist the old
-  // project before switching, so the stale closure race is mitigated.
+  // (a) Workspace autosave: watches [workspaces]
+  // ARCHITECTURAL NOTE: This effect ONLY handles workspace document saves.
+  // It does NOT write or dirty project metadata. Project metadata is only
+  // modified by intentional workspace management actions (create/rename/delete)
+  // or by the metadata autosave effect (nextId/reminders/pinGroups changes).
+  // This separation prevents canvas editing from bumping the project metadata
+  // revision, which eliminates false version conflicts in multi-tab scenarios.
   useEffect(() => {
     if (!initialized || !activeProjectId) return;
     if (isPreviewMode) return; // No saves in Preview Mode
 
-    // --- IMMEDIATE localStorage save ---
+    // --- IMMEDIATE localStorage save (workspace documents only) ---
     const currentWorkspaces = workspaces;
     const prevWorkspaces = prevWorkspacesRef.current;
-    const projMeta = loadProjectMeta(activeProjectId);
     let anyChanged = false;
     for (const ws of currentWorkspaces) {
       const prevWs = prevWorkspaces ? prevWorkspaces.find(pw => pw.id === ws.id) : null;
@@ -2034,39 +2039,22 @@ export default function WorkflowApp() {
       // un-uploaded edits (and the return-check won't silently discard them).
       markDirty(wsPath(activeProjectId, ws.id), wsData);
     }
-    if (projMeta && anyChanged) {
-      // NOTE: workspaceIds is kept in the LOCAL projMeta only. It is never sent
-      // to Firestore by saveProjectToFirestore (delta-managed via arrayUnion).
-      const updatedMeta = { ...projMeta, activeTab, workspaceIds: currentWorkspaces.map(ws => ws.id), lastModified: Date.now() };
-      saveProjectMeta(activeProjectId, updatedMeta);
-      markDirty(metaPath(activeProjectId), { activeTab, nextId: updatedMeta.nextId, reminders: updatedMeta.reminders || [], pinGroups: updatedMeta.pinGroups || [] });
-    }
     if (anyChanged) {
       setProjects(prev => prev.map(p => p.id === activeProjectId
-        ? { ...p, workspaces: currentWorkspaces, activeTab, lastModified: Date.now() }
+        ? { ...p, workspaces: currentWorkspaces, lastModified: Date.now() }
         : p
       ));
-    }
-    const meta = loadMeta();
-    if (meta) {
-      saveMeta({ ...meta, activeProjectId });
     }
     prevWorkspacesRef.current = currentWorkspaces;
 
     // --- Guard: skip Firestore write-back on the first run after init ---
-    // After init() loads data from Firestore/localStorage, the autosave fires because
-    // prevWorkspacesRef was null, causing anyChanged=true. Uploading this unchanged
-    // data back to Firestore is wasteful and can cause issues. Skip the server save
-    // on this first run; localStorage writes above are harmless (same data).
     if (justInitializedRef.current) {
       justInitializedRef.current = false;
       return;
     }
 
-    // --- DEBOUNCED (3s) Firestore save ---
-    // Read from localStorage inside the callback to avoid stale closure issues.
-    // By the time this callback fires, localStorage already has the latest state
-    // (written synchronously above), so we always upload the freshest data.
+    // --- DEBOUNCED (3s) Firestore save (workspace documents only) ---
+    // No project metadata is uploaded here. Only dirty workspace documents.
     if (isFirebaseConfigured() && anyChanged && firestoreLoadSucceededRef.current) {
       serverWorkspaceSaverRef.current.schedule(() => {
         const currentProjectId = activeProjectIdRef.current;
@@ -2084,15 +2072,7 @@ export default function WorkflowApp() {
             wsPromises.push(saveWorkspaceToFirestore(currentProjectId, wsId, wsData));
           }
         }
-        // Upload project metadata only when dirty (workspaceIds is stripped inside).
-        const metaPromise = (freshProjMeta && isDirty(metaPath(currentProjectId)))
-          ? saveProjectToFirestore(currentProjectId, { ...freshProjMeta, lastModified: Date.now() })
-          : Promise.resolve(true);
-        // Read defaultProjectId from localStorage to avoid stale closure capture
-        const freshMeta = loadMeta();
-        const currentDefaultProjectId = (freshMeta && freshMeta.defaultProjectId) || currentProjectId;
-        const userMetaPromise = saveUserMeta({ activeProjectId: currentProjectId, defaultProjectId: currentDefaultProjectId });
-        return Promise.all([...wsPromises, metaPromise, userMetaPromise])
+        return Promise.all(wsPromises)
           .then(results => {
             const allOk = results.every(r => r !== false);
             setSyncStatus(allOk ? 'synced' : 'error');
@@ -2108,23 +2088,46 @@ export default function WorkflowApp() {
       prevActiveProjectIdRef.current = activeProjectId;
     }
     return () => serverWorkspaceSaverRef.current.cancel();
-  }, [workspaces, activeTab, initialized, activeProjectId]);
+  }, [workspaces, initialized, activeProjectId]);
+
+  // (a2) ActiveTab persistence: watches [activeTab]
+  // Saves the active tab pointer locally for session resume purposes.
+  // Does NOT mark project metadata dirty or trigger a Firestore revision bump.
+  // This ensures switching between workspaces never causes version conflicts.
+  useEffect(() => {
+    if (!initialized || !activeProjectId) return;
+    if (isPreviewMode) return;
+    // Save activeTab to local project metadata (for resume on reload)
+    const projMeta = loadProjectMeta(activeProjectId);
+    if (projMeta && projMeta.activeTab !== activeTab) {
+      saveProjectMeta(activeProjectId, { ...projMeta, activeTab });
+    }
+    // Keep cm-meta in sync
+    const meta = loadMeta();
+    if (meta) {
+      saveMeta({ ...meta, activeProjectId });
+    }
+    // Update projects state
+    setProjects(prev => prev.map(p => p.id === activeProjectId
+      ? { ...p, activeTab }
+      : p
+    ));
+  }, [activeTab, initialized, activeProjectId]);
 
   // (b) Task autosave: watches [tasks, taskGroups]
   useEffect(() => {
     if (!initialized || !activeProjectId) return;
     if (isPreviewMode) return; // No saves in Preview Mode
 
-    // --- IMMEDIATE localStorage save ---
+    // --- IMMEDIATE localStorage save (task document only) ---
     const tasksData = { tasks, taskGroups };
     saveTasks(activeProjectId, tasksData);
-    const projMeta = loadProjectMeta(activeProjectId);
-    if (projMeta) {
-      const updatedMeta = { ...projMeta, lastModified: Date.now() };
-      saveProjectMeta(activeProjectId, updatedMeta);
-    }
+    // NOTE: We intentionally do NOT write project metadata here.
+    // Tasks have their own document (cm-tasks-{projectId}) and their own
+    // sync-state path. Modifying tasks should not bump the project metadata
+    // revision, which would cause false conflicts in multi-tab scenarios.
     setProjects(prev => prev.map(p => p.id === activeProjectId
-      ? { ...p, tasks, taskGroups, lastModified: Date.now() }
+      ? { ...p, tasks, taskGroups }
       : p
     ));
 
@@ -2142,24 +2145,20 @@ export default function WorkflowApp() {
     // Mark tasks dirty (real user change).
     markDirty(tasksPath(activeProjectId), tasksData);
 
-    // --- DEBOUNCED (3s) Firestore save ---
+    // --- DEBOUNCED (3s) Firestore save (task document only) ---
+    // No project metadata is uploaded here.
     if (isFirebaseConfigured() && firestoreLoadSucceededRef.current) {
       serverTaskSaverRef.current.schedule(() => {
         const currentProjectId = activeProjectIdRef.current;
         setSyncStatus('syncing');
-        const projMetaForServer = loadProjectMeta(currentProjectId);
         // Read fresh tasks from localStorage to avoid stale closure
         const freshTasksData = loadTasks(currentProjectId) || { tasks: [], taskGroups: [] };
         const taskPromise = isDirty(tasksPath(currentProjectId))
           ? saveTasksToFirestore(currentProjectId, freshTasksData)
           : Promise.resolve(true);
-        const metaPromise = (projMetaForServer && isDirty(metaPath(currentProjectId)))
-          ? saveProjectToFirestore(currentProjectId, { ...projMetaForServer, lastModified: Date.now() })
-          : Promise.resolve(true);
-        return Promise.all([taskPromise, metaPromise])
-          .then(results => {
-            const allOk = results.every(r => r !== false);
-            setSyncStatus(allOk ? 'synced' : 'error');
+        return taskPromise
+          .then(result => {
+            setSyncStatus(result !== false ? 'synced' : 'error');
           })
           .catch(() => setSyncStatus('error'));
       });
@@ -2168,6 +2167,9 @@ export default function WorkflowApp() {
   }, [tasks, taskGroups, initialized, activeProjectId]);
 
   // (c) Metadata autosave: watches [nextId, reminders, pinGroups]
+  // These are genuine project-level metadata fields that should be synced.
+  // nextId ensures unique IDs across devices, reminders/pinGroups are project settings.
+  // Only marks dirty and uploads when values actually change (not on init hydration).
   useEffect(() => {
     if (!initialized || !activeProjectId) return;
     if (isPreviewMode) return; // No saves in Preview Mode
@@ -2175,13 +2177,19 @@ export default function WorkflowApp() {
     // --- IMMEDIATE localStorage save ---
     const projMeta = loadProjectMeta(activeProjectId);
     if (projMeta) {
-      const updatedMeta = { ...projMeta, nextId, reminders, pinGroups, lastModified: Date.now() };
-      saveProjectMeta(activeProjectId, updatedMeta);
+      // Only write if something actually changed to avoid spurious lastModified bumps
+      const changed = projMeta.nextId !== nextId ||
+        JSON.stringify(projMeta.reminders || []) !== JSON.stringify(reminders || []) ||
+        JSON.stringify(projMeta.pinGroups || []) !== JSON.stringify(pinGroups || []);
+      if (changed) {
+        const updatedMeta = { ...projMeta, nextId, reminders, pinGroups, lastModified: Date.now() };
+        saveProjectMeta(activeProjectId, updatedMeta);
+        setProjects(prev => prev.map(p => p.id === activeProjectId
+          ? { ...p, nextId, reminders, pinGroups, lastModified: Date.now() }
+          : p
+        ));
+      }
     }
-    setProjects(prev => prev.map(p => p.id === activeProjectId
-      ? { ...p, nextId, reminders, pinGroups, lastModified: Date.now() }
-      : p
-    ));
 
     // Skip the first post-init run so loaded metadata is not re-uploaded/dirtied.
     if (metaAutosaveFirstRunRef.current) {
@@ -3585,8 +3593,8 @@ export default function WorkflowApp() {
 
   const deleteWorkspace = async (id, e) => {
     if (isReferenceMode) return; // read-only reference tab never deletes
-    if (isPreviewMode) { e.stopPropagation(); return; }
-    e.stopPropagation();
+    if (isPreviewMode) { if (e) e.stopPropagation(); return; }
+    if (e) e.stopPropagation();
     if (workspaces.length <= 1) return;
     takeSnapshot();
 
@@ -3636,6 +3644,9 @@ export default function WorkflowApp() {
     setWorkspaces(prev => prev.filter(w => w.id !== id));
     if (activeTab === id) setActiveTab(workspaces.find(w => w.id !== id).id);
   };
+
+  /** Wrapper for WorkspaceManager (no event parameter needed). */
+  const deleteWorkspaceById = (id) => deleteWorkspace(id, null);
 
   const renameWorkspace = (id, newName) => {
     if (isReferenceMode) return; // read-only reference tab never writes
@@ -7237,42 +7248,20 @@ export default function WorkflowApp() {
             </div>
 
             <div className="p-4 border-b border-slate-100">
-              <span className="text-xs font-bold text-slate-400 tracking-wider uppercase block mb-3">Mind Map Workspaces</span>
-              <div className="flex flex-col gap-1 max-h-36 overflow-y-auto custom-scrollbar pr-1">
-                {workspaces.map(ws => (
-                  <div 
-                    key={ws.id} 
-                    onClick={() => handleCanvasSwitch(ws.id)}
-                    className={`group flex items-center justify-between p-2 rounded-lg cursor-pointer transition-colors ${
-                      activeTab === ws.id ? 'bg-indigo-50/80 text-indigo-900 font-semibold' : 'hover:bg-slate-50 text-slate-600'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 overflow-hidden">
-                      <FolderOpen className={`w-4 h-4 shrink-0 ${activeTab === ws.id ? 'text-indigo-600' : 'text-slate-400'}`} />
-                      {editingTab === ws.id ? (
-                        <input autoFocus className="bg-transparent border-none outline-none w-full text-sm font-semibold" defaultValue={ws.name} onBlur={(e) => renameWorkspace(ws.id, e.target.value || 'Untitled')} onKeyDown={(e) => e.key === 'Enter' && renameWorkspace(ws.id, e.currentTarget.value || 'Untitled')} />
-                      ) : (
-                        <span className="text-sm truncate" onDoubleClick={() => { if (isPreviewMode) return; takeSnapshot(); setEditingTab(ws.id); }}>{ws.name}</span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <button onClick={(e) => { e.stopPropagation(); duplicateWorkspace(ws.id); }} className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-slate-200" title="Duplicate workspace">
-                        <Copy className="w-3.5 h-3.5 text-slate-400 hover:text-indigo-500" />
-                      </button>
-                      {!isPreviewMode && workspaces.length > 1 && (
-                        <button onClick={(e) => deleteWorkspace(ws.id, e)} className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-slate-200">
-                          <X className="w-3.5 h-3.5 text-slate-400 hover:text-red-500" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-                {!isPreviewMode && (
-                <button onClick={addWorkspace} className="flex items-center justify-center p-2 rounded-lg border border-dashed border-slate-200 hover:border-indigo-300 text-xs font-semibold text-indigo-600 hover:bg-indigo-50/50 transition-all mt-1">
-                  <Plus className="w-3.5 h-3.5 mr-1" /> Add New Workspace
-                </button>
-                )}
-              </div>
+              <span className="text-xs font-bold text-slate-400 tracking-wider uppercase block mb-3">Workspaces</span>
+              <button
+                onClick={() => setShowWorkspaceManager(true)}
+                className="flex items-center justify-center gap-2 w-full px-3 py-2.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-sm font-semibold rounded-lg border border-indigo-200 transition-all"
+                title="Open Workspace Manager to create, rename, or delete workspaces"
+              >
+                <Settings className="w-4 h-4" />
+                Manage Workspaces
+              </button>
+              <p className="text-[10px] text-slate-400 mt-2 text-center leading-relaxed">
+                Create, rename, or delete workspaces.
+                <br />
+                Use the top bar to switch between them.
+              </p>
             </div>
 
 
@@ -8929,6 +8918,21 @@ export default function WorkflowApp() {
             </button>
           </div>
         </div>
+      )}
+
+      {/* --- Workspace Manager Modal --- */}
+      {showWorkspaceManager && (
+        <WorkspaceManager
+          workspaces={workspaces}
+          activeTab={activeTab}
+          onCreateWorkspace={() => { addWorkspace(); setShowWorkspaceManager(false); }}
+          onRenameWorkspace={renameWorkspace}
+          onDeleteWorkspace={deleteWorkspaceById}
+          onDuplicateWorkspace={(id) => { duplicateWorkspace(id); setShowWorkspaceManager(false); }}
+          onSwitchWorkspace={handleCanvasSwitch}
+          onClose={() => setShowWorkspaceManager(false)}
+          isPreviewMode={isPreviewMode}
+        />
       )}
 
       {/* --- Secret Project Panel --- */}
