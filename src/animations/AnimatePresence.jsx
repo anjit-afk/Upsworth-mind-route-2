@@ -34,47 +34,52 @@ const PRESETS = {
   modal: {
     enterClass: 'animate-modal-in',
     exitClass: 'animate-modal-out',
-    exitDuration: 150,
+    exitDuration: 220,
   },
   backdrop: {
     enterClass: 'animate-backdrop-in',
     exitClass: 'animate-backdrop-out',
-    exitDuration: 150,
+    exitDuration: 220,
   },
   menu: {
     enterClass: 'animate-menu-in',
     exitClass: 'animate-menu-out',
-    exitDuration: 100,
+    exitDuration: 150,
   },
   panel: {
     enterClass: 'animate-panel-in',
     exitClass: 'animate-panel-out',
-    exitDuration: 200,
+    exitDuration: 260,
   },
   sidebar: {
     enterClass: 'animate-sidebar-in',
     exitClass: 'animate-sidebar-out',
-    exitDuration: 200,
+    exitDuration: 260,
   },
   toast: {
     enterClass: 'animate-toast-in',
     exitClass: 'animate-toast-out',
-    exitDuration: 200,
+    exitDuration: 240,
   },
   banner: {
     enterClass: 'animate-banner-in',
     exitClass: 'animate-banner-out',
-    exitDuration: 200,
+    exitDuration: 240,
   },
   fade: {
     enterClass: 'animate-fade-in',
     exitClass: 'animate-fade-out',
-    exitDuration: 150,
+    exitDuration: 200,
   },
   content: {
     enterClass: 'animate-content-in',
     exitClass: 'animate-fade-out',
-    exitDuration: 150,
+    exitDuration: 200,
+  },
+  result: {
+    enterClass: 'animate-result-in',
+    exitClass: 'animate-fade-out',
+    exitDuration: 200,
   },
 };
 
@@ -126,7 +131,7 @@ export function AnimatedBackdrop({ show, onClick, className = '' }) {
   const { shouldRender, animationClass } = useAnimatedMount(show, {
     enterClass: 'animate-backdrop-in',
     exitClass: 'animate-backdrop-out',
-    exitDuration: 150,
+    exitDuration: 220,
   });
 
   if (!shouldRender) return null;

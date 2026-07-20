@@ -13,42 +13,49 @@
  * - ease-in-fast: For exits (accelerates away quickly)
  */
 
-// Duration constants (ms)
+// Duration constants (ms) -- these MUST stay in sync with the durations used
+// in src/animations/index.css. The *Close/*Exit values are the ones
+// useAnimatedMount/AnimatePresence rely on to time the unmount.
 export const DURATION = {
   // Core interaction durations
-  instant: 50,      // Button press feedback
-  fast: 120,        // Menu/dropdown close, tooltip hide
-  normal: 180,      // Modal/panel open, menu open
-  slow: 250,        // Notification entry, page transitions
-  gentle: 350,      // Large panel slides, content reveals
+  instant: 90,      // Button press feedback
+  fast: 150,        // Menu/dropdown close, tooltip hide
+  normal: 260,      // Fade / backdrop
+  slow: 340,        // Modal open
+  gentle: 420,      // Toast / large slides
 
-  // Semantic aliases
-  buttonPress: 50,
-  menuOpen: 150,
-  menuClose: 100,
-  modalOpen: 200,
-  modalClose: 150,
-  panelSlide: 250,
-  panelClose: 200,
-  toastEnter: 300,
-  toastExit: 200,
-  contentReveal: 250,
+  // Semantic aliases (open)
+  buttonPress: 90,
+  menuOpen: 200,
+  modalOpen: 340,
+  panelOpen: 360,
+  sidebarOpen: 340,
+  toastEnter: 420,
+  bannerEnter: 400,
+  contentReveal: 320,
+  resultReveal: 360,
+
+  // Semantic aliases (close) -- used to delay unmount
+  menuClose: 150,
+  modalClose: 220,
+  backdropClose: 220,
+  panelClose: 260,
+  sidebarClose: 260,
+  toastExit: 240,
+  bannerExit: 240,
+  fadeClose: 200,
 };
 
-// Easing curves (CSS cubic-bezier values)
+// Easing curves (CSS cubic-bezier values) -- mirror the CSS custom properties
+// defined in src/animations/index.css.
 export const EASING = {
   // Primary curves
-  easeOutSmooth: 'cubic-bezier(0.32, 0.72, 0, 1)',      // Fast start, smooth stop (entries)
-  easeInFast: 'cubic-bezier(0.36, 0, 0.66, -0.56)',     // Accelerate away (exits)
-  easeInOutSoft: 'cubic-bezier(0.45, 0, 0.55, 1)',      // Symmetric gentle curve
-
-  // Specialty curves
+  easeOutSmooth: 'cubic-bezier(0.22, 1, 0.36, 1)',      // Decelerate to a calm stop (entries)
+  easeInFast: 'cubic-bezier(0.4, 0, 1, 1)',             // Accelerate away (exits)
   spring: 'cubic-bezier(0.34, 1.56, 0.64, 1)',          // Slight overshoot (playful entry)
-  decelerate: 'cubic-bezier(0.0, 0.0, 0.2, 1)',         // Material-style decelerate
-  accelerate: 'cubic-bezier(0.4, 0.0, 1, 1)',           // Material-style accelerate
 
-  // Tailwind-compatible names (used in tailwind.config.js)
-  DEFAULT: 'cubic-bezier(0.32, 0.72, 0, 1)',
+  // Tailwind-compatible name (used in tailwind.config.js)
+  DEFAULT: 'cubic-bezier(0.22, 1, 0.36, 1)',
 };
 
 // Scale values for open/close

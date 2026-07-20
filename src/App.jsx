@@ -20,6 +20,7 @@ import { clampPanelPct, DEFAULT_PANEL_PCT } from './PanelResize';
 import MarkdownRenderer from './MarkdownRenderer';
 import CardEditorPanel from './CardEditorPanel';
 import WorkspaceManager from './WorkspaceManager';
+import { useAnimatedMount } from './animations';
 import { parseRouteIntent, buildEditorPath, buildViewPath } from './routing/useRouteIntent';
 import { isFirebaseConfigured } from './firebase';
 import { validateWorkspaces } from './workspaceValidator';
@@ -3464,6 +3465,50 @@ export default function WorkflowApp() {
     return () => { if (reminderNotificationTimerRef.current) clearTimeout(reminderNotificationTimerRef.current); };
   }, [activeReminderNotification, dismissReminderNotification]);
 
+  // ============================================================
+  // Animated mount/unmount wiring (PRESENTATION ONLY)
+  // These hooks keep an element mounted for the duration of its exit
+  // animation so CLOSE animations actually play. They never read or write
+  // app data, routing, sync, autosave or persistence -- they only delay
+  // the visual unmount by a couple hundred milliseconds.
+  // ============================================================
+  const pinPanelMount = useAnimatedMount(showPinPanel && viewMode === 'canvas', {
+    enterClass: 'animate-panel-in', exitClass: 'animate-panel-out', exitDuration: 260,
+  });
+  const reminderPanelMount = useAnimatedMount(showReminderPanel && viewMode === 'canvas', {
+    enterClass: 'animate-panel-in', exitClass: 'animate-panel-out', exitDuration: 260,
+  });
+  const cardEditorMount = useAnimatedMount(showCardEditorPanel && viewMode === 'canvas', {
+    enterClass: 'animate-panel-in', exitClass: 'animate-panel-out', exitDuration: 260,
+  });
+  const taskPanelMount = useAnimatedMount(taskPanelMode !== 'closed', {
+    enterClass: 'animate-panel-in', exitClass: 'animate-panel-out', exitDuration: 260,
+  });
+  // Freeze the task panel mode during its exit so the layout (panel vs
+  // fullscreen) doesn't flip mid-animation.
+  const lastTaskPanelModeRef = useRef('panel');
+  if (taskPanelMode !== 'closed') lastTaskPanelModeRef.current = taskPanelMode;
+  const effectiveTaskPanelMode = taskPanelMode !== 'closed' ? taskPanelMode : lastTaskPanelModeRef.current;
+
+  const projectPanelMount = useAnimatedMount(showProjectPanel, {
+    enterClass: 'animate-modal-in', exitClass: 'animate-modal-out', exitDuration: 220,
+  });
+
+  const partialImportMount = useAnimatedMount(showPartialImportDialog && !!partialImportData, {
+    enterClass: 'animate-modal-in', exitClass: 'animate-modal-out', exitDuration: 220,
+  });
+  // Keep the last import payload around during the exit animation.
+  const lastPartialImportDataRef = useRef(null);
+  if (partialImportData) lastPartialImportDataRef.current = partialImportData;
+  const effectivePartialImportData = partialImportData || lastPartialImportDataRef.current;
+
+  const toastMount = useAnimatedMount(!!toastMessage, {
+    enterClass: 'animate-toast-in', exitClass: 'animate-toast-out', exitDuration: 240,
+  });
+  const lastToastRef = useRef('');
+  if (toastMessage) lastToastRef.current = toastMessage;
+  const effectiveToast = toastMessage || lastToastRef.current;
+
   // --- S key toggles sidebar ---
   useEffect(() => {
     const handleSidebarKey = (e) => {
@@ -6469,17 +6514,21 @@ export default function WorkflowApp() {
     </div>
   );
 
-  const renderProjectPanel = (isGate = false) => {
+  const renderProjectPanel = (isGate = false, isExiting = false) => {
     const zBg = isGate ? 'z-[10000]' : 'z-[9998]';
     const zContent = isGate ? 'z-[10001]' : 'z-[9999]';
+    // Presentation only: swap enter/exit animation classes so the panel plays a
+    // smooth close animation before it unmounts.
+    const modalClass = isExiting ? 'animate-modal-out' : 'animate-modal-in';
+    const backdropClass = isExiting ? 'animate-backdrop-out' : 'animate-backdrop-in';
 
     // Gate mode: simple switch list for password-protected project auth screen
     if (isGate) {
       return (
         <>
-          <div className={`fixed inset-0 ${zBg} bg-slate-900/40 backdrop-blur-sm animate-backdrop-in`} onClick={() => setShowProjectPanel(false)} />
+          <div className={`fixed inset-0 ${zBg} bg-slate-900/40 backdrop-blur-sm ${backdropClass}`} onClick={() => setShowProjectPanel(false)} />
           <div className={`fixed inset-0 ${zContent} flex items-center justify-center pointer-events-none`}>
-            <div className="bg-white rounded-xl shadow-xl border border-slate-200 p-6 w-full max-w-xs mx-4 pointer-events-auto animate-modal-in">
+            <div className={`bg-white rounded-xl shadow-xl border border-slate-200 p-6 w-full max-w-xs mx-4 pointer-events-auto ${modalClass}`}>
               {projectPanelMode === 'switch' ? (
                 <div className="space-y-3">
                   <div className="flex items-center justify-center mb-2">
@@ -6535,12 +6584,12 @@ export default function WorkflowApp() {
     // Full dashboard mode (non-gate)
     return (
       <>
-        <div className={`fixed inset-0 ${zBg} bg-slate-900/60 backdrop-blur-sm animate-backdrop-in`} onClick={() => { setShowProjectPanel(false); setCardMenuOpenId(null); }} />
+        <div className={`fixed inset-0 ${zBg} bg-slate-900/60 backdrop-blur-sm ${backdropClass}`} onClick={() => { setShowProjectPanel(false); setCardMenuOpenId(null); }} />
         <div className={`fixed inset-0 ${zContent} flex items-center justify-center pointer-events-none`}>
 
           {/* Dashboard Grid */}
           {projectPanelMode === 'dashboard' && (
-            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl mx-4 max-h-[80vh] flex flex-col pointer-events-auto animate-modal-in">
+            <div className={`bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl mx-4 max-h-[80vh] flex flex-col pointer-events-auto ${modalClass}`}>
               <div className="flex items-center justify-between p-5 border-b border-slate-100">
                 <h2 className="text-lg font-bold text-slate-800">Projects</h2>
                 <div className="flex items-center gap-2">
@@ -6606,7 +6655,7 @@ export default function WorkflowApp() {
 
           {/* Create/Edit Modal */}
           {(projectPanelMode === 'create' || projectPanelMode === 'edit') && (
-            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md mx-4 pointer-events-auto animate-modal-in">
+            <div className={`bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md mx-4 pointer-events-auto ${modalClass}`}>
               <div className="p-5 border-b border-slate-100">
                 <h3 className="text-lg font-bold text-slate-800">{projectPanelMode === 'create' ? 'New Project' : 'Edit Project'}</h3>
               </div>
@@ -6662,7 +6711,7 @@ export default function WorkflowApp() {
 
           {/* Switch mode (password entry) */}
           {projectPanelMode === 'switch' && (
-            <div className="bg-white rounded-xl shadow-xl border border-slate-200 p-6 w-full max-w-xs mx-4 pointer-events-auto animate-modal-in">
+            <div className={`bg-white rounded-xl shadow-xl border border-slate-200 p-6 w-full max-w-xs mx-4 pointer-events-auto ${modalClass}`}>
               <div className="space-y-3">
                 <div className="flex items-center justify-center mb-2"><Lock className="w-5 h-5 text-slate-400" /></div>
                 <p className="text-sm text-slate-600 text-center">Enter password to switch project</p>
@@ -6676,7 +6725,7 @@ export default function WorkflowApp() {
 
           {/* Delete confirmation */}
           {projectPanelMode === 'delete' && (
-            <div className="bg-white rounded-xl shadow-xl border border-slate-200 p-6 w-full max-w-xs mx-4 pointer-events-auto animate-modal-in">
+            <div className={`bg-white rounded-xl shadow-xl border border-slate-200 p-6 w-full max-w-xs mx-4 pointer-events-auto ${modalClass}`}>
               <div className="space-y-3">
                 <div className="flex items-center justify-center mb-2"><Trash2 className="w-5 h-5 text-red-400" /></div>
                 <p className="text-sm text-slate-600 text-center">Delete &quot;{projects.find(p => p.id === selectedProjectId)?.name}&quot;?</p>
@@ -6692,7 +6741,7 @@ export default function WorkflowApp() {
 
           {/* Change Password mode */}
           {projectPanelMode === 'changePassword' && (
-            <div className="bg-white rounded-xl shadow-xl border border-slate-200 p-6 w-full max-w-xs mx-4 pointer-events-auto animate-modal-in">
+            <div className={`bg-white rounded-xl shadow-xl border border-slate-200 p-6 w-full max-w-xs mx-4 pointer-events-auto ${modalClass}`}>
               <div className="space-y-3">
                 <div className="flex items-center justify-center mb-2"><Lock className="w-5 h-5 text-slate-400" /></div>
                 {(() => { const current = projects.find(p => p.id === activeProjectId); return current && current.password; })() && (
@@ -6761,7 +6810,7 @@ export default function WorkflowApp() {
             </button>
           </form>
         </div>
-        {showProjectPanel && renderProjectPanel(true)}
+        {projectPanelMount.shouldRender && renderProjectPanel(true, projectPanelMount.isExiting)}
       </div>
     );
   }
@@ -8504,9 +8553,9 @@ export default function WorkflowApp() {
         })()}
 
         {/* --- Pin Panel --- */}
-        {showPinPanel && viewMode === 'canvas' && (
+        {pinPanelMount.shouldRender && (
           <PinPanel
-            className="animate-panel-in"
+            className={pinPanelMount.animationClass}
             workspaces={workspaces}
             activeTab={activeTab}
             onNavigateToPin={navigateToPin}
@@ -8514,7 +8563,7 @@ export default function WorkflowApp() {
             onDeletePin={deletePin}
             onToggleVisibility={togglePinVisibility}
             onToggleAllVisibility={toggleAllPinsVisibility}
-            showPanel={showPinPanel}
+            showPanel={true}
             onClose={() => setShowPinPanel(false)}
             tasks={tasks}
             pinGroups={pinGroups}
@@ -8526,11 +8575,11 @@ export default function WorkflowApp() {
         )}
 
         {/* --- Reminder Panel --- */}
-        {showReminderPanel && viewMode === 'canvas' && (
+        {reminderPanelMount.shouldRender && (
           <ReminderPanel
-            className="animate-panel-in"
+            className={reminderPanelMount.animationClass}
             reminders={reminders}
-            showPanel={showReminderPanel}
+            showPanel={true}
             onClose={() => setShowReminderPanel(false)}
             onAddReminder={(reminder) => { setReminders(prev => [...prev, { ...reminder, id: `r-${Date.now()}`, createdAt: Date.now(), lastShownAt: null, nextReminderAt: reminder.enabled ? Date.now() + reminder.frequency * 60000 : null }]); }}
             onUpdateReminder={(id, updates) => { setReminders(prev => prev.map(r => r.id === id ? { ...r, ...updates, nextReminderAt: updates.enabled === false ? null : (updates.frequency && updates.frequency !== r.frequency ? Date.now() + updates.frequency * 60000 : r.nextReminderAt) } : r)); }}
@@ -8558,9 +8607,9 @@ export default function WorkflowApp() {
         )}
 
         {/* --- Card Editor Panel --- */}
-        {showCardEditorPanel && viewMode === 'canvas' && (
+        {cardEditorMount.shouldRender && (
           <CardEditorPanel
-            className="animate-panel-in"
+            className={cardEditorMount.animationClass}
             selectedNode={cardEditorNode}
             onUpdateNode={(updates) => {
               if (cardEditorNode) {
@@ -8577,9 +8626,9 @@ export default function WorkflowApp() {
         )}
 
         {/* --- Full Task Manager (side panel / fullscreen) --- */}
-        {taskPanelMode !== 'closed' && (
+        {taskPanelMount.shouldRender && (
           <FullTaskManager
-            className="animate-panel-in"
+            className={taskPanelMount.animationClass}
             tasks={tasks}
             showPanel={true}
             onClose={() => setTaskPanelMode('closed')}
@@ -8600,7 +8649,7 @@ export default function WorkflowApp() {
             onDeleteGroup={deleteTaskGroup}
             onUpdateGroupColor={updateTaskGroupColor}
             onReorderGroup={reorderTaskGroup}
-            mode={taskPanelMode}
+            mode={effectiveTaskPanelMode}
             onToggleFullscreen={() => setTaskPanelMode(prev => prev === 'fullscreen' ? 'panel' : 'fullscreen')}
             panelWidthPct={panelWidthPct}
             onSetPanelWidth={setPanelWidthPct}
@@ -8940,7 +8989,7 @@ export default function WorkflowApp() {
       )}
 
       {/* --- Secret Project Panel --- */}
-      {showProjectPanel && renderProjectPanel(false)}
+      {projectPanelMount.shouldRender && renderProjectPanel(false, projectPanelMount.isExiting)}
 
       {/* --- Timer Running Countdown (when panel closed) --- */}
       {timerRunning && !showTimer && (
@@ -8963,9 +9012,9 @@ export default function WorkflowApp() {
       )}
 
       {/* --- Toast Notification --- */}
-      {toastMessage && (
-        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[90] px-4 py-2 bg-slate-800 text-white text-sm font-medium rounded-full shadow-lg animate-toast-in">
-          {toastMessage}
+      {toastMount.shouldRender && (
+        <div className={`fixed bottom-20 left-1/2 -translate-x-1/2 z-[90] px-4 py-2 bg-slate-800 text-white text-sm font-medium rounded-full shadow-lg ${toastMount.animationClass}`}>
+          {effectiveToast}
         </div>
       )}
 
@@ -9005,11 +9054,11 @@ export default function WorkflowApp() {
       )}
 
       {/* --- Partial Import Placement Dialog --- */}
-      {showPartialImportDialog && partialImportData && (
+      {partialImportMount.shouldRender && effectivePartialImportData && (
         <>
-          <div className="fixed inset-0 z-[200] bg-slate-900/60 backdrop-blur-sm animate-backdrop-in" onClick={() => { setShowPartialImportDialog(false); setPartialImportData(null); }} />
+          <div className={`fixed inset-0 z-[200] bg-slate-900/60 backdrop-blur-sm ${partialImportMount.isExiting ? 'animate-backdrop-out' : 'animate-backdrop-in'}`} onClick={() => { setShowPartialImportDialog(false); setPartialImportData(null); }} />
           <div className="fixed inset-0 z-[201] flex items-center justify-center pointer-events-none">
-            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md mx-4 pointer-events-auto animate-modal-in">
+            <div className={`bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md mx-4 pointer-events-auto ${partialImportMount.isExiting ? 'animate-modal-out' : 'animate-modal-in'}`}>
               <div className="flex items-center justify-between p-5 border-b border-slate-100">
                 <h2 className="text-lg font-bold text-slate-800">Import Partial Map</h2>
                 <button onClick={() => { setShowPartialImportDialog(false); setPartialImportData(null); }} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">
@@ -9018,8 +9067,8 @@ export default function WorkflowApp() {
               </div>
               <div className="p-5 space-y-4">
                 <div className="bg-slate-50 rounded-lg p-3 text-sm text-slate-600">
-                  <p className="font-medium text-slate-800 mb-1">Source: {partialImportData.metadata?.sourceWorkspace || 'Unknown'}</p>
-                  <p>{partialImportData.metadata?.nodeCount || 0} nodes, {partialImportData.metadata?.edgeCount || 0} connections</p>
+                  <p className="font-medium text-slate-800 mb-1">Source: {effectivePartialImportData.metadata?.sourceWorkspace || 'Unknown'}</p>
+                  <p>{effectivePartialImportData.metadata?.nodeCount || 0} nodes, {effectivePartialImportData.metadata?.edgeCount || 0} connections</p>
                 </div>
                 <div>
                   <span className="text-sm font-semibold text-slate-700 block mb-2">Placement</span>
