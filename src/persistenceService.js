@@ -813,8 +813,12 @@ export async function saveProjectToFirestore(projectId, metadata) {
   const path = metaPath(projectId);
   return guardedFirestoreSave(`projects/${projectId}`, async () => {
     try {
-      // Strip password (local-only) AND workspaceIds (delta-managed only)
-      const { password, workspaceIds, ...safeMetadata } = metadata;
+      // Strip fields that must NEVER be written to Firestore:
+      // - password: local-only (security)
+      // - workspaceIds: delta-managed only via arrayUnion/arrayRemove
+      // - activeTab: per-device state, never shared (Milestone 1 safety fix)
+      // - nextId: retired from Firestore, new IDs use generateId() (Milestone 1 safety fix)
+      const { password, workspaceIds, activeTab, nextId, ...safeMetadata } = metadata;
       const docRef = doc(db, 'projects', projectId);
       const payload = { ...safeMetadata, schemaVersion: safeMetadata.schemaVersion || SCHEMA_VERSION };
       const res = await transactionalWrite({ docRef, path, payload, mergeMode: true });

@@ -2037,9 +2037,13 @@ export default function WorkflowApp() {
     if (projMeta && anyChanged) {
       // NOTE: workspaceIds is kept in the LOCAL projMeta only. It is never sent
       // to Firestore by saveProjectToFirestore (delta-managed via arrayUnion).
+      // activeTab is also local-only (never written to Firestore - Milestone 1).
       const updatedMeta = { ...projMeta, activeTab, workspaceIds: currentWorkspaces.map(ws => ws.id), lastModified: Date.now() };
       saveProjectMeta(activeProjectId, updatedMeta);
-      markDirty(metaPath(activeProjectId), { activeTab, nextId: updatedMeta.nextId, reminders: updatedMeta.reminders || [], pinGroups: updatedMeta.pinGroups || [] });
+      // NOTE: We intentionally do NOT markDirty(metaPath(...)) here.
+      // The workspace autosave is NOT the owner of the project metadata document.
+      // Only the Project Manager and the reminders/pinGroups effect write to Firestore
+      // for the project doc. This eliminates unnecessary Firestore writes and conflicts.
     }
     if (anyChanged) {
       setProjects(prev => prev.map(p => p.id === activeProjectId
@@ -2067,6 +2071,9 @@ export default function WorkflowApp() {
     // Read from localStorage inside the callback to avoid stale closure issues.
     // By the time this callback fires, localStorage already has the latest state
     // (written synchronously above), so we always upload the freshest data.
+    // NOTE: This effect ONLY writes workspace documents. It does NOT write the
+    // project metadata document to Firestore. The project doc is owned by the
+    // Project Manager and the reminders/pinGroups effect (Milestone 1 ownership).
     if (isFirebaseConfigured() && anyChanged && firestoreLoadSucceededRef.current) {
       serverWorkspaceSaverRef.current.schedule(() => {
         const currentProjectId = activeProjectIdRef.current;
@@ -2084,15 +2091,7 @@ export default function WorkflowApp() {
             wsPromises.push(saveWorkspaceToFirestore(currentProjectId, wsId, wsData));
           }
         }
-        // Upload project metadata only when dirty (workspaceIds is stripped inside).
-        const metaPromise = (freshProjMeta && isDirty(metaPath(currentProjectId)))
-          ? saveProjectToFirestore(currentProjectId, { ...freshProjMeta, lastModified: Date.now() })
-          : Promise.resolve(true);
-        // Read defaultProjectId from localStorage to avoid stale closure capture
-        const freshMeta = loadMeta();
-        const currentDefaultProjectId = (freshMeta && freshMeta.defaultProjectId) || currentProjectId;
-        const userMetaPromise = saveUserMeta({ activeProjectId: currentProjectId, defaultProjectId: currentDefaultProjectId });
-        return Promise.all([...wsPromises, metaPromise, userMetaPromise])
+        return Promise.all(wsPromises)
           .then(results => {
             const allOk = results.every(r => r !== false);
             setSyncStatus(allOk ? 'synced' : 'error');
@@ -2147,19 +2146,14 @@ export default function WorkflowApp() {
       serverTaskSaverRef.current.schedule(() => {
         const currentProjectId = activeProjectIdRef.current;
         setSyncStatus('syncing');
-        const projMetaForServer = loadProjectMeta(currentProjectId);
         // Read fresh tasks from localStorage to avoid stale closure
         const freshTasksData = loadTasks(currentProjectId) || { tasks: [], taskGroups: [] };
         const taskPromise = isDirty(tasksPath(currentProjectId))
           ? saveTasksToFirestore(currentProjectId, freshTasksData)
           : Promise.resolve(true);
-        const metaPromise = (projMetaForServer && isDirty(metaPath(currentProjectId)))
-          ? saveProjectToFirestore(currentProjectId, { ...projMetaForServer, lastModified: Date.now() })
-          : Promise.resolve(true);
-        return Promise.all([taskPromise, metaPromise])
-          .then(results => {
-            const allOk = results.every(r => r !== false);
-            setSyncStatus(allOk ? 'synced' : 'error');
+        return taskPromise
+          .then(result => {
+            setSyncStatus(result !== false ? 'synced' : 'error');
           })
           .catch(() => setSyncStatus('error'));
       });
@@ -2507,7 +2501,7 @@ export default function WorkflowApp() {
 
       const newNode = {
         ...clipData.node,
-        id: nextId.toString(),
+        id: generateId(),
         x: pasteX,
         y: pasteY,
         groupId: null,
@@ -2560,12 +2554,11 @@ export default function WorkflowApp() {
         });
       }
 
-      setNextId(prev => prev + 1);
       localStorage.removeItem('nexus-clipboard');
     } catch (e) {
       // Invalid clipboard data, ignore
     }
-  }, [takeSnapshot, nextId, transform, updateActiveWorkspace, setWorkspaces, activeTab]);
+  }, [takeSnapshot, transform, updateActiveWorkspace, setWorkspaces, activeTab]);
 
   // --- Copy/Cut/Paste Group Functions ---
   const copyGroup = useCallback((groupId) => {
@@ -2652,17 +2645,14 @@ export default function WorkflowApp() {
       }
 
       // Generate new IDs for all groups, nodes, and edges
-      let idCounter = nextId;
       const groupIdMap = {};
       const nodeIdMap = {};
 
       clipData.groups.forEach(g => {
-        groupIdMap[g.id] = `g-${Date.now()}-${idCounter}`;
-        idCounter++;
+        groupIdMap[g.id] = `g-${generateId()}`;
       });
       clipData.nodes.forEach(n => {
-        nodeIdMap[n.id] = idCounter.toString();
-        idCounter++;
+        nodeIdMap[n.id] = generateId();
       });
 
       const newGroups = clipData.groups.map(g => ({
@@ -2685,7 +2675,7 @@ export default function WorkflowApp() {
 
       const newEdges = clipData.edges.map(e => ({
         ...e,
-        id: `e-${Date.now()}-${idCounter++}`,
+        id: `e-${generateId()}`,
         source: nodeIdMap[e.source] || e.source,
         target: nodeIdMap[e.target] || e.target,
         workspaceId: activeTab
@@ -2735,12 +2725,11 @@ export default function WorkflowApp() {
         });
       }
 
-      setNextId(idCounter);
       localStorage.removeItem('nexus-clipboard-group');
     } catch (e) {
       // Invalid clipboard data, ignore
     }
-  }, [takeSnapshot, nextId, transform, updateActiveWorkspace, setWorkspaces, activeTab]);
+  }, [takeSnapshot, transform, updateActiveWorkspace, setWorkspaces, activeTab]);
 
   // --- Copy/Cut/Paste Multi-Selection Functions ---
   const copyMultiSelection = useCallback((selectedIds) => {
@@ -2942,26 +2931,22 @@ export default function WorkflowApp() {
       pasteOffsetRef.current += 20;
 
       // Generate new IDs
-      let idCounter = nextId;
       const groupIdMap = {};
       const nodeIdMap = {};
       const imageIdMap = {};
       const pinIdMap = {};
 
       (clipData.groups || []).forEach(g => {
-        groupIdMap[g.id] = `g-${Date.now()}-${idCounter}`;
-        idCounter++;
+        groupIdMap[g.id] = `g-${generateId()}`;
       });
       (clipData.nodes || []).forEach(n => {
-        nodeIdMap[n.id] = idCounter.toString();
-        idCounter++;
+        nodeIdMap[n.id] = generateId();
       });
       (clipData.images || []).forEach(img => {
-        imageIdMap[img.id] = `img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        imageIdMap[img.id] = `img-${generateId()}`;
       });
       (clipData.pins || []).forEach(pin => {
-        pinIdMap[pin.id] = `pin-${Date.now()}-${idCounter}`;
-        idCounter++;
+        pinIdMap[pin.id] = `pin-${generateId()}`;
       });
 
       // Remap and create new objects
@@ -3003,7 +2988,7 @@ export default function WorkflowApp() {
 
       const newEdges = (clipData.edges || []).map(e => ({
         ...e,
-        id: `e-${Date.now()}-${idCounter++}`,
+        id: `e-${generateId()}`,
         source: nodeIdMap[e.source] || e.source,
         target: nodeIdMap[e.target] || e.target,
         workspaceId: activeTab
@@ -3073,8 +3058,6 @@ export default function WorkflowApp() {
         });
       }
 
-      setNextId(idCounter);
-
       // Auto-select all newly pasted objects
       const newSelectedIds = [
         ...newNodes.map(n => n.id),
@@ -3086,7 +3069,7 @@ export default function WorkflowApp() {
     } catch (e) {
       // Invalid clipboard data, ignore
     }
-  }, [isPreviewMode, takeSnapshot, nextId, transform, updateActiveWorkspace, setWorkspaces, activeTab]);
+  }, [isPreviewMode, takeSnapshot, transform, updateActiveWorkspace, setWorkspaces, activeTab]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -3651,27 +3634,23 @@ export default function WorkflowApp() {
     const source = workspaces.find(w => w.id === wsId);
     if (!source) return;
     const newWsId = generateId();
-    let idCounter = nextId;
     const nodeIdMap = {};
     const groupIdMap = {};
     const pinIdMap = {};
 
     // Generate new IDs for groups
     (source.groups || []).forEach(g => {
-      groupIdMap[g.id] = `g-${Date.now()}-${idCounter}`;
-      idCounter++;
+      groupIdMap[g.id] = `g-${generateId()}`;
     });
 
     // Generate new IDs for nodes
     (source.nodes || []).forEach(n => {
-      nodeIdMap[n.id] = idCounter.toString();
-      idCounter++;
+      nodeIdMap[n.id] = generateId();
     });
 
     // Generate new IDs for pins
     (source.pins || []).forEach(p => {
-      pinIdMap[p.id] = `pin-${Date.now()}-${idCounter}`;
-      idCounter++;
+      pinIdMap[p.id] = `pin-${generateId()}`;
     });
 
     const newNodes = (source.nodes || []).map(n => ({
@@ -3691,7 +3670,7 @@ export default function WorkflowApp() {
 
     const newEdges = (source.edges || []).map(e => ({
       ...e,
-      id: `e-${Date.now()}-${idCounter++}`,
+      id: `e-${generateId()}`,
       source: nodeIdMap[e.source] || e.source,
       target: nodeIdMap[e.target] || e.target,
       workspaceId: newWsId
@@ -3705,7 +3684,7 @@ export default function WorkflowApp() {
 
     const newImages = (source.images || []).map(img => ({
       ...img,
-      id: `img-${Date.now()}-${idCounter++}`,
+      id: `img-${generateId()}`,
       workspaceId: newWsId
     }));
 
@@ -3721,7 +3700,6 @@ export default function WorkflowApp() {
 
     setWorkspaces(prev => [...prev, newWorkspace]);
     setActiveTab(newWsId);
-    setNextId(idCounter);
     setTransform({ x: 0, y: 0, scale: 1 });
 
     // Save the new workspace to per-workspace keys and update project metadata
@@ -4778,20 +4756,17 @@ export default function WorkflowApp() {
     }
 
     // Generate new IDs and remap references
-    let currentId = nextId;
     const nodeIdMap = {};
     const groupIdMap = {};
 
     importedGroups.forEach(g => {
-      const newId = `g-imported-${currentId}`;
+      const newId = `g-${generateId()}`;
       groupIdMap[g.id] = newId;
-      currentId++;
     });
 
     importedNodes.forEach(n => {
-      const newId = currentId.toString();
+      const newId = generateId();
       nodeIdMap[n.id] = newId;
-      currentId++;
     });
 
     const newNodes = importedNodes.map(n => ({
@@ -4807,7 +4782,7 @@ export default function WorkflowApp() {
     const newEdges = importedEdges
       .filter(e => nodeIdMap[e.source] && nodeIdMap[e.target])
       .map(e => ({
-        id: `e-${currentId++}`,
+        id: `e-${generateId()}`,
         source: nodeIdMap[e.source],
         target: nodeIdMap[e.target],
         workspaceId: activeTab
@@ -4832,7 +4807,6 @@ export default function WorkflowApp() {
       };
     });
 
-    setNextId(currentId);
     setSelectedNodeIds(newNodes.map(n => n.id));
     setShowPartialImportDialog(false);
     setPartialImportData(null);
@@ -5497,7 +5471,7 @@ export default function WorkflowApp() {
     }
 
     const newNode = {
-      id: nextId.toString(),
+      id: generateId(),
       workspaceId: activeTab,
       x: targetX, y: targetY,
       title: 'New Card', content: '', theme: 'blue',
@@ -5511,7 +5485,6 @@ export default function WorkflowApp() {
         groups: computeLayout(ws.groups, updatedNodes)
       };
     });
-    setNextId(prev => prev + 1);
   };
 
   const addNodeRef = useRef(addNode);
@@ -5829,7 +5802,7 @@ export default function WorkflowApp() {
     if (!target) return;
 
     const dup = {
-      id: nextId.toString(),
+      id: generateId(),
       workspaceId: activeTab,
       x: target.x + 40,
       y: target.y + 40,
@@ -5848,7 +5821,6 @@ export default function WorkflowApp() {
         groups: computeLayout(ws.groups, updatedNodes)
       };
     });
-    setNextId(prev => prev + 1);
   };
 
   const cloneNode = (nodeId) => {
@@ -5861,7 +5833,7 @@ export default function WorkflowApp() {
     const sourceId = target.cloneSourceId || target.id;
 
     const clone = {
-      id: nextId.toString(),
+      id: generateId(),
       workspaceId: activeTab,
       x: target.x + 60,
       y: target.y + 60,
@@ -5879,7 +5851,6 @@ export default function WorkflowApp() {
         groups: computeLayout(ws.groups, updatedNodes)
       };
     });
-    setNextId(prev => prev + 1);
   };
 
   const cloneNodeToWorkspace = (nodeId, targetWorkspaceId) => {
@@ -5898,7 +5869,7 @@ export default function WorkflowApp() {
     const cloneY = 200 + 60 * existingClonesCount;
 
     const clone = {
-      id: nextId.toString(),
+      id: generateId(),
       x: cloneX,
       y: cloneY,
       title: target.title,
@@ -5914,7 +5885,6 @@ export default function WorkflowApp() {
       const updatedNodes = [...ws.nodes, clone];
       return { ...ws, nodes: updatedNodes, groups: computeLayout(ws.groups, updatedNodes) };
     }));
-    setNextId(prev => prev + 1);
   };
 
   const disconnectNodeLinks = (nodeId) => {
@@ -8862,7 +8832,7 @@ export default function WorkflowApp() {
               <button onClick={() => { if (isPreviewMode) return; takeSnapshot(); const deletedImages = (activeWs?.images || []).filter(img => selectedNodeIds.includes(img.id)); const deletedImageIds = deletedImages.map(img => img.id); updateActiveWorkspace(ws => { const filtered = ws.nodes.filter(n => !selectedNodeIds.includes(n.id)); const filteredGroups = ws.groups.filter(g => !selectedNodeIds.includes(g.id)); const filteredImages = (ws.images || []).filter(img => !selectedNodeIds.includes(img.id)); const filteredEdges = ws.edges.filter(e => !selectedNodeIds.includes(e.source) && !selectedNodeIds.includes(e.target)); return { nodes: filtered, edges: filteredEdges, groups: computeLayout(filteredGroups, filtered), images: filteredImages }; }); if (deletedImageIds.length > 0) { const allWorkspaces = stateRef.current.workspaces || []; const safeToDeleteIds = deletedImages.filter(delImg => { if (!delImg.url) return false; return !allWorkspaces.some(ws => (ws.images || []).some(img => img.id !== delImg.id && img.url === delImg.url)); }).map(img => img.id); if (safeToDeleteIds.length > 0) { deleteWorkspaceImages(activeProjectId, activeTab, safeToDeleteIds); } } setSelectedNodeIds([]); setSelectionMenuOpen(false); }} className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 rounded-lg transition-colors w-full text-left">
                 <Trash2 className="w-4 h-4" /> Delete
               </button>
-              <button onClick={() => { if (isPreviewMode) return; takeSnapshot(); const selectedNodes = nodes.filter(n => selectedNodeIds.includes(n.id)); const selectedEdges = edges.filter(e => selectedNodeIds.includes(e.source) && selectedNodeIds.includes(e.target)); const selectedImages = (activeWs?.images || []).filter(img => selectedNodeIds.includes(img.id)); let currentId = nextId; const idMap = {}; const newNodes = selectedNodes.map(n => { const newId = currentId.toString(); idMap[n.id] = newId; currentId++; return { ...n, id: newId, x: n.x + 40, y: n.y + 40, cloneSourceId: null, workspaceId: activeTab }; }); const newEdges = selectedEdges.map(e => ({ id: `e-${currentId++}`, source: idMap[e.source] || e.source, target: idMap[e.target] || e.target, workspaceId: activeTab })); const newImages = selectedImages.map(img => ({ ...img, id: `img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, x: img.x + 40, y: img.y + 40, workspaceId: activeTab })); updateActiveWorkspace(ws => { const updatedNodes = [...ws.nodes, ...newNodes]; return { nodes: updatedNodes, edges: [...ws.edges, ...newEdges], groups: computeLayout(ws.groups, updatedNodes), images: [...(ws.images || []), ...newImages] }; }); setNextId(currentId); setSelectedNodeIds([...newNodes.map(n => n.id), ...newImages.map(img => img.id)]); setSelectionMenuOpen(false); }} className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors w-full text-left">
+              <button onClick={() => { if (isPreviewMode) return; takeSnapshot(); const selectedNodes = nodes.filter(n => selectedNodeIds.includes(n.id)); const selectedEdges = edges.filter(e => selectedNodeIds.includes(e.source) && selectedNodeIds.includes(e.target)); const selectedImages = (activeWs?.images || []).filter(img => selectedNodeIds.includes(img.id)); const idMap = {}; const newNodes = selectedNodes.map(n => { const newId = generateId(); idMap[n.id] = newId; return { ...n, id: newId, x: n.x + 40, y: n.y + 40, cloneSourceId: null, workspaceId: activeTab }; }); const newEdges = selectedEdges.map(e => ({ id: `e-${generateId()}`, source: idMap[e.source] || e.source, target: idMap[e.target] || e.target, workspaceId: activeTab })); const newImages = selectedImages.map(img => ({ ...img, id: `img-${generateId()}`, x: img.x + 40, y: img.y + 40, workspaceId: activeTab })); updateActiveWorkspace(ws => { const updatedNodes = [...ws.nodes, ...newNodes]; return { nodes: updatedNodes, edges: [...ws.edges, ...newEdges], groups: computeLayout(ws.groups, updatedNodes), images: [...(ws.images || []), ...newImages] }; }); setSelectedNodeIds([...newNodes.map(n => n.id), ...newImages.map(img => img.id)]); setSelectionMenuOpen(false); }} className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors w-full text-left">
                 <Copy className="w-4 h-4" /> Duplicate
               </button>
               <button onClick={() => { exportSelectedNodes(selectedNodeIds); setSelectionMenuOpen(false); }} className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50 rounded-lg transition-colors w-full text-left" id="export-selected-btn">
