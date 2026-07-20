@@ -8505,8 +8505,8 @@ export default function WorkflowApp() {
 
         {/* --- Pin Panel --- */}
         {showPinPanel && viewMode === 'canvas' && (
-          <div className="animate-panel-in">
           <PinPanel
+            className="animate-panel-in"
             workspaces={workspaces}
             activeTab={activeTab}
             onNavigateToPin={navigateToPin}
@@ -8523,13 +8523,12 @@ export default function WorkflowApp() {
             onSetPanelWidth={setPanelWidthPct}
             isPreviewMode={isPreviewMode}
           />
-          </div>
         )}
 
         {/* --- Reminder Panel --- */}
         {showReminderPanel && viewMode === 'canvas' && (
-          <div className="animate-panel-in">
           <ReminderPanel
+            className="animate-panel-in"
             reminders={reminders}
             showPanel={showReminderPanel}
             onClose={() => setShowReminderPanel(false)}
@@ -8556,13 +8555,12 @@ export default function WorkflowApp() {
             onSetPanelWidth={setPanelWidthPct}
             isPreviewMode={isPreviewMode}
           />
-          </div>
         )}
 
         {/* --- Card Editor Panel --- */}
         {showCardEditorPanel && viewMode === 'canvas' && (
-          <div className="animate-panel-in">
           <CardEditorPanel
+            className="animate-panel-in"
             selectedNode={cardEditorNode}
             onUpdateNode={(updates) => {
               if (cardEditorNode) {
@@ -8576,13 +8574,12 @@ export default function WorkflowApp() {
             isPreviewMode={isPreviewMode}
             isArrangeMode={isArrangeMode}
           />
-          </div>
         )}
 
         {/* --- Full Task Manager (side panel / fullscreen) --- */}
         {taskPanelMode !== 'closed' && (
-          <div className="animate-panel-in">
           <FullTaskManager
+            className="animate-panel-in"
             tasks={tasks}
             showPanel={true}
             onClose={() => setTaskPanelMode('closed')}
@@ -8609,7 +8606,6 @@ export default function WorkflowApp() {
             onSetPanelWidth={setPanelWidthPct}
             isPreviewMode={isPreviewMode}
           />
-          </div>
         )}
 
         {/* --- Outline Backlog Board View --- */}

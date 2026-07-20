@@ -53,6 +53,7 @@ function getGroupColor(group) {
 }
 
 export default function FullTaskManager({
+  className = '',
   tasks,
   showPanel,
   onClose,
@@ -342,7 +343,7 @@ export default function FullTaskManager({
 
   return (
     <div
-      className={isPanel ? 'relative bg-white border-l border-slate-200 flex flex-col overflow-hidden shrink-0 h-full' : 'fixed inset-0 z-50 bg-white flex flex-col'}
+      className={`${isPanel ? 'relative bg-white border-l border-slate-200 flex flex-col overflow-hidden shrink-0 h-full' : 'fixed inset-0 z-50 bg-white flex flex-col'} ${className}`}
       style={isPanel ? { width: `${panelWidthPct}%`, minWidth: 360 } : undefined}
     >
       {/* Resize handle (drag left edge) - panel mode only */}

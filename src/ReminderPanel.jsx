@@ -176,6 +176,7 @@ function EditForm({ isNew, editForm, setEditForm, customFreqInput, setCustomFreq
 }
 
 export default function ReminderPanel({
+  className = '',
   reminders,
   showPanel,
   onClose,
@@ -281,7 +282,7 @@ export default function ReminderPanel({
 
   return (
     <div
-      className="relative bg-white border-l border-slate-200 flex flex-col overflow-hidden shrink-0"
+      className={`relative bg-white border-l border-slate-200 flex flex-col overflow-hidden shrink-0 ${className}`}
       style={{ width: `${panelWidthPct}%`, minWidth: 300 }}
     >
       {/* Resize handle (drag left edge) */}
