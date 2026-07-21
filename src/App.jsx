@@ -2040,7 +2040,35 @@ export default function WorkflowApp() {
       // un-uploaded edits (and the return-check won't silently discard them).
       markDirty(wsPath(activeProjectId, ws.id), wsData);
     }
-    if (anyChanged) {
+
+    // --- INTENTIONAL workspace-management changes (create / rename / delete) ---
+    // RESTORED behavior: these are the only workspace actions that should touch
+    // the SHARED project-metadata document. A change to the workspace ID list
+    // (add/remove) or a workspace NAME change marks project meta dirty so the
+    // debounced saver uploads it and the server `revision` advances. That
+    // revision bump is the exact signal other tabs/devices detect via the
+    // existing freshness check + conflict flow (surfacing the refresh/conflict
+    // popup). Plain canvas edits (nodes/edges) and tab switches deliberately do
+    // NOT bump meta revision, so they never create false multi-tab conflicts.
+    const idListChanged = prevWorkspaces && (
+      currentWorkspaces.length !== prevWorkspaces.length ||
+      currentWorkspaces.some((ws, i) => !prevWorkspaces[i] || ws.id !== prevWorkspaces[i].id)
+    );
+    const nameChanged = prevWorkspaces && currentWorkspaces.some(ws => {
+      const pw = prevWorkspaces.find(p => p.id === ws.id);
+      return pw && pw.name !== ws.name;
+    });
+    const workspaceListChanged = !!(idListChanged || nameChanged);
+    if (workspaceListChanged) {
+      const projMeta = loadProjectMeta(activeProjectId);
+      if (projMeta) {
+        const updatedMeta = { ...projMeta, workspaceIds: currentWorkspaces.map(ws => ws.id), lastModified: Date.now() };
+        saveProjectMeta(activeProjectId, updatedMeta);
+        markDirty(metaPath(activeProjectId), { workspaceIds: updatedMeta.workspaceIds, nextId: updatedMeta.nextId, reminders: updatedMeta.reminders || [], pinGroups: updatedMeta.pinGroups || [] });
+      }
+    }
+
+    if (anyChanged || workspaceListChanged) {
       setProjects(prev => prev.map(p => p.id === activeProjectId
         ? { ...p, workspaces: currentWorkspaces, lastModified: Date.now() }
         : p
@@ -2054,9 +2082,11 @@ export default function WorkflowApp() {
       return;
     }
 
-    // --- DEBOUNCED (3s) Firestore save (workspace documents only) ---
-    // No project metadata is uploaded here. Only dirty workspace documents.
-    if (isFirebaseConfigured() && anyChanged && firestoreLoadSucceededRef.current) {
+    // --- DEBOUNCED (3s) Firestore save (workspace documents + project meta) ---
+    // Workspace documents are uploaded when dirty. Project metadata is uploaded
+    // ONLY when a workspace-management change (create/rename/delete) marked it
+    // dirty above - which bumps the server revision so other tabs detect it.
+    if (isFirebaseConfigured() && (anyChanged || workspaceListChanged) && firestoreLoadSucceededRef.current) {
       serverWorkspaceSaverRef.current.schedule(() => {
         const currentProjectId = activeProjectIdRef.current;
         setSyncStatus('syncing');
@@ -2073,7 +2103,12 @@ export default function WorkflowApp() {
             wsPromises.push(saveWorkspaceToFirestore(currentProjectId, wsId, wsData));
           }
         }
-        return Promise.all(wsPromises)
+        // Upload project metadata only when dirty (workspaceIds is stripped
+        // inside saveProjectToFirestore; the transactional write bumps revision).
+        const metaPromise = (freshProjMeta && isDirty(metaPath(currentProjectId)))
+          ? saveProjectToFirestore(currentProjectId, { ...freshProjMeta, lastModified: Date.now() })
+          : Promise.resolve(true);
+        return Promise.all([...wsPromises, metaPromise])
           .then(results => {
             const allOk = results.every(r => r !== false);
             setSyncStatus(allOk ? 'synced' : 'error');
@@ -2081,7 +2116,7 @@ export default function WorkflowApp() {
           .catch(() => setSyncStatus('error'));
       });
     }
-    if (!isFirebaseConfigured() && anyChanged) setSyncStatus('synced');
+    if (!isFirebaseConfigured() && (anyChanged || workspaceListChanged)) setSyncStatus('synced');
 
     // Track activeProjectId changes - reset workspace tracking on project switch
     if (prevActiveProjectIdRef.current !== activeProjectId) {
