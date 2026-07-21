@@ -3640,12 +3640,13 @@ export default function WorkflowApp() {
 
 
   // --- Workspace (Tab) Operations ---
-  const addWorkspace = async () => {
+  const addWorkspace = async (name) => {
     if (isReferenceMode) return; // read-only reference tab never writes
     if (isPreviewMode) return;
     takeSnapshot();
 
-    // Flush pending Firestore writes before switching to the new tab
+    // Flush pending Firestore writes so the current workspace's edits are
+    // safely persisted before we add the new workspace.
     if (isFirebaseConfigured()) {
       setSyncStatus('syncing');
       try {
@@ -3657,18 +3658,24 @@ export default function WorkflowApp() {
     }
 
     const newId = generateId();
-    setWorkspaces(prev => [...prev, { id: newId, name: `Map Phase ${prev.length + 1}`, nodes: [], edges: [], groups: [] }]);
-    setActiveTab(newId);
-    setTransform({ x: 0, y: 0, scale: 1 });
+    // Centralized name: use the caller-provided name (trimmed) or fall back to a
+    // sensible default. Computing it once keeps the in-memory and persisted
+    // copies from ever drifting apart.
+    const wsName = (name && name.trim()) || `Map Phase ${workspaces.length + 1}`;
+    // NOTE: we intentionally do NOT switch to the new workspace or reset the
+    // canvas transform here. The new workspace appears in the Workspace Manager
+    // list and the user opens it by clicking it. This keeps creation calm and
+    // non-disruptive (no instant jump into a blank canvas).
+    setWorkspaces(prev => [...prev, { id: newId, name: wsName, nodes: [], edges: [], groups: [] }]);
     // Save workspace immediately and update project metadata
-    saveWorkspaceToLocal(activeProjectId, newId, { id: newId, name: `Map Phase ${workspaces.length + 1}`, nodes: [], edges: [], groups: [], pins: [], images: [], lastModified: Date.now() });
+    saveWorkspaceToLocal(activeProjectId, newId, { id: newId, name: wsName, nodes: [], edges: [], groups: [], pins: [], images: [], lastModified: Date.now() });
     const projMeta = loadProjectMeta(activeProjectId);
     if (projMeta) {
       const updatedIds = [...(projMeta.workspaceIds || []), newId];
       saveProjectMeta(activeProjectId, { ...projMeta, workspaceIds: updatedIds });
       if (isFirebaseConfigured()) addWorkspaceIdToFirestore(activeProjectId, newId).catch(() => {});
     }
-    if (isFirebaseConfigured()) saveWorkspaceToFirestore(activeProjectId, newId, { id: newId, name: `Map Phase ${workspaces.length + 1}`, nodes: [], edges: [], groups: [], pins: [], images: [], lastModified: Date.now() }).catch(() => {});
+    if (isFirebaseConfigured()) saveWorkspaceToFirestore(activeProjectId, newId, { id: newId, name: wsName, nodes: [], edges: [], groups: [], pins: [], images: [], lastModified: Date.now() }).catch(() => {});
   };
 
   const deleteWorkspace = async (id, e) => {
@@ -3810,10 +3817,10 @@ export default function WorkflowApp() {
       images: newImages
     };
 
+    // Consistent with create: the duplicated workspace appears in the Workspace
+    // Manager list without force-switching the canvas. The user clicks it to open.
     setWorkspaces(prev => [...prev, newWorkspace]);
-    setActiveTab(newWsId);
     setNextId(idCounter);
-    setTransform({ x: 0, y: 0, scale: 1 });
 
     // Save the new workspace to per-workspace keys and update project metadata
     saveWorkspaceToLocal(activeProjectId, newWsId, {
@@ -9013,10 +9020,10 @@ export default function WorkflowApp() {
         <WorkspaceManager
           workspaces={workspaces}
           activeTab={activeTab}
-          onCreateWorkspace={() => { addWorkspace(); setShowWorkspaceManager(false); }}
+          onCreateWorkspace={(name) => addWorkspace(name)}
           onRenameWorkspace={renameWorkspace}
           onDeleteWorkspace={deleteWorkspaceById}
-          onDuplicateWorkspace={(id) => { duplicateWorkspace(id); setShowWorkspaceManager(false); }}
+          onDuplicateWorkspace={(id) => duplicateWorkspace(id)}
           onSwitchWorkspace={handleCanvasSwitch}
           onClose={() => setShowWorkspaceManager(false)}
           isPreviewMode={isPreviewMode}

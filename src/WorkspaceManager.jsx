@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Plus, Trash2, X, Pencil, Check, FolderOpen, Settings } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Plus, Trash2, X, Pencil, Check, FolderOpen, Settings, Copy } from 'lucide-react';
 
 /**
  * WorkspaceManager - A dedicated modal for workspace structure management.
@@ -14,7 +14,7 @@ import { Plus, Trash2, X, Pencil, Check, FolderOpen, Settings } from 'lucide-rea
  * Props:
  * - workspaces: Array of workspace objects
  * - activeTab: Currently active workspace ID
- * - onCreateWorkspace: () => void - Creates a new workspace
+ * - onCreateWorkspace: (name) => void - Creates a new workspace with the given name
  * - onRenameWorkspace: (id, newName) => void - Renames a workspace
  * - onDeleteWorkspace: (id) => void - Deletes a workspace
  * - onDuplicateWorkspace: (id) => void - Duplicates a workspace
@@ -36,6 +36,45 @@ export default function WorkspaceManager({
   const [editingId, setEditingId] = useState(null);
   const [editingName, setEditingName] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [isCreating, setIsCreating] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [highlightLast, setHighlightLast] = useState(false);
+  const listRef = useRef(null);
+  const prevCountRef = useRef(workspaces.length);
+
+  // When a workspace is added (via create or duplicate), scroll it into view and
+  // briefly highlight it so the user can see where the new workspace landed.
+  useEffect(() => {
+    if (workspaces.length > prevCountRef.current) {
+      setHighlightLast(true);
+      requestAnimationFrame(() => {
+        if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
+      });
+      const t = setTimeout(() => setHighlightLast(false), 1600);
+      prevCountRef.current = workspaces.length;
+      return () => clearTimeout(t);
+    }
+    prevCountRef.current = workspaces.length;
+  }, [workspaces.length]);
+
+  const startCreate = () => {
+    setNewName(`Map Phase ${workspaces.length + 1}`);
+    setIsCreating(true);
+  };
+
+  const commitCreate = () => {
+    // Empty-name guard: fall back to a sensible default so a blank-named
+    // workspace can never be created.
+    const name = newName.trim() || `Map Phase ${workspaces.length + 1}`;
+    onCreateWorkspace(name);
+    setIsCreating(false);
+    setNewName('');
+  };
+
+  const cancelCreate = () => {
+    setIsCreating(false);
+    setNewName('');
+  };
 
   const startRename = (ws) => {
     setEditingId(ws.id);
@@ -90,15 +129,15 @@ export default function WorkspaceManager({
           </div>
 
           {/* Workspace List */}
-          <div className="flex-1 overflow-y-auto p-5 space-y-2">
-            {workspaces.map((ws) => (
+          <div ref={listRef} className="flex-1 overflow-y-auto p-5 space-y-2">
+            {workspaces.map((ws, idx) => (
               <div
                 key={ws.id}
                 className={`group flex items-center gap-3 p-3 rounded-xl border transition-all ${
                   activeTab === ws.id
                     ? 'bg-indigo-50/60 border-indigo-200 shadow-sm'
                     : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50/50'
-                }`}
+                } ${highlightLast && idx === workspaces.length - 1 ? 'ring-2 ring-indigo-400 ring-offset-1' : ''}`}
               >
                 {/* Icon */}
                 <div className={`p-1.5 rounded-lg ${
@@ -168,7 +207,7 @@ export default function WorkspaceManager({
                         className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-md transition-colors"
                         title="Duplicate workspace"
                       >
-                        <Plus className="w-3.5 h-3.5" />
+                        <Copy className="w-3.5 h-3.5" />
                       </button>
                     )}
                     {workspaces.length > 1 && (
@@ -201,6 +240,44 @@ export default function WorkspaceManager({
                 )}
               </div>
             ))}
+
+            {/* Inline "name-before-create" row. The user names the workspace
+                first; on confirm it is added to the list above (not opened),
+                and they click it to open. */}
+            {isCreating && (
+              <div className="flex items-center gap-3 p-3 rounded-xl border border-indigo-300 bg-indigo-50/50">
+                <div className="p-1.5 rounded-lg bg-indigo-100">
+                  <FolderOpen className="w-4 h-4 text-indigo-600" />
+                </div>
+                <div className="flex-1 min-w-0 flex items-center gap-2">
+                  <input
+                    autoFocus
+                    type="text"
+                    value={newName}
+                    placeholder="Workspace name"
+                    onFocus={(e) => e.target.select()}
+                    onChange={(e) => setNewName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') commitCreate();
+                      if (e.key === 'Escape') cancelCreate();
+                    }}
+                    className="flex-1 min-w-0 px-2 py-1 text-sm font-medium border border-indigo-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                  />
+                  <button
+                    onClick={commitCreate}
+                    className="px-3 py-1 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-md transition-colors whitespace-nowrap"
+                  >
+                    Create
+                  </button>
+                  <button
+                    onClick={cancelCreate}
+                    className="px-2 py-1 text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-md transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Footer */}
@@ -210,8 +287,9 @@ export default function WorkspaceManager({
             </span>
             {!isPreviewMode && (
               <button
-                onClick={onCreateWorkspace}
-                className="flex items-center gap-1.5 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg shadow-sm transition-colors"
+                onClick={startCreate}
+                disabled={isCreating}
+                className="flex items-center gap-1.5 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Plus className="w-4 h-4" />
                 New Workspace
