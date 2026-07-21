@@ -17,7 +17,7 @@ const THEME_OPTIONS = [
   { key: 'slate', name: 'Neutral Slate', color: '#e2e8f0' },
 ];
 
-export default function CardEditorPanel({ selectedNode, onUpdateNode, onSnapshot, onClose, isPreviewMode, isArrangeMode, panelWidthPct = 40, onSetPanelWidth }) {
+export default function CardEditorPanel({ className = '', selectedNode, onUpdateNode, onSnapshot, onClose, isPreviewMode, isArrangeMode, panelWidthPct = 40, onSetPanelWidth }) {
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [theme, setTheme] = useState('blue');
@@ -77,7 +77,7 @@ export default function CardEditorPanel({ selectedNode, onUpdateNode, onSnapshot
 
   return (
     <div
-      className="relative bg-white border-l border-slate-200 flex flex-col overflow-hidden shrink-0"
+      className={`relative bg-white border-l border-slate-200 flex flex-col overflow-hidden shrink-0 ${className}`}
       style={{ width: `${panelWidthPct}%`, minWidth: 320 }}
     >
       {/* Resize handle (drag left edge) */}

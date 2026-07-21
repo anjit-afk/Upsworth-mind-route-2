@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client'
 import { HashRouter } from 'react-router-dom'
 import App from './App.jsx'
 import './index.css'
+import './animations/index.css'
 
 // HashRouter is used deliberately (not BrowserRouter):
 // - The app is a static-hosted SPA served with a relative base ("./"), so

@@ -38,6 +38,7 @@ function getGroupColor(group) {
 
 
 export default function PinPanel({
+  className = '',
   workspaces,
   activeTab,
   onNavigateToPin,
@@ -321,7 +322,7 @@ export default function PinPanel({
 
   return (
     <div
-      className="relative bg-white border-l border-slate-200 flex flex-col overflow-hidden shrink-0"
+      className={`relative bg-white border-l border-slate-200 flex flex-col overflow-hidden shrink-0 ${className}`}
       style={{ width: `${panelWidthPct}%`, minWidth: 320 }}
     >
       {/* Resize handle (drag left edge) */}
