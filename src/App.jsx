@@ -9,7 +9,7 @@ import {
   MoreVertical, ImageIcon, ChevronUp, Scissors, ClipboardPaste,
   Lock, Shield, Eye, EyeOff, GitBranch, Map, Timer,
   MapPin, Bell, Pencil, MousePointer, ListTodo, Cloud, CloudOff, Loader,
-  AlertTriangle, Settings
+  AlertTriangle, Settings, Clock
 } from 'lucide-react';
 import MiniMap from './MiniMap';
 import PinPanel, { PIN_ICONS } from './PinPanel';
@@ -22,6 +22,8 @@ import CardEditorPanel from './CardEditorPanel';
 import WorkspaceManager from './WorkspaceManager';
 import { useAnimatedMount } from './animations';
 import { parseRouteIntent, buildEditorPath, buildViewPath } from './routing/useRouteIntent';
+import useEditorSessionTimer from './routing/useEditorSessionTimer';
+import EditorSessionTimer from './EditorSessionTimer';
 import { isFirebaseConfigured } from './firebase';
 import { validateWorkspaces } from './workspaceValidator';
 import { uploadImage as uploadImageToStorage, deleteImage as deleteImageFromStorage, deleteWorkspaceImages } from './imageStorageService';
@@ -714,6 +716,43 @@ export default function WorkflowApp() {
   const [projects, setProjects] = useState([]);
   const [activeProjectId, setActiveProjectId] = useState('');
   const [defaultProjectId, setDefaultProjectId] = useState('');
+
+  // --- Editor Session Timer (auto-inactivity -> read-only View) ---
+  // Architectural feature: an editor tab runs a bounded 5-minute editing
+  // session. On expiry the tab is auto-demoted to the View route (read-only),
+  // so future multi-tab logic can treat "editor tab with a live countdown" as
+  // the only real editing session. This is fully isolated from the sync engine:
+  // it writes nothing and only performs a client-side route change.
+  //
+  // Paused while a blocking flow is open (conflicts, clear/restore confirmation,
+  // device picker, history restore) so the redirect never fires mid-dialog.
+  const editorSessionPaused =
+    (pendingConflicts && pendingConflicts.length > 0) ||
+    showConfirmClear ||
+    confirmRestoreId != null ||
+    showDevicePicker ||
+    historyBusy;
+  const editorSession = useEditorSessionTimer({
+    // Runs only on the editor route (never in reference/View mode) once a
+    // project + workspace are actually loaded.
+    active: initialized && !isReferenceMode && !!activeProjectId && !!activeTab,
+    paused: editorSessionPaused,
+    // If a cloud sync is in-flight at zero, wait for it to settle before
+    // redirecting - we never interrupt or race the sync engine.
+    isSyncBusy: () => syncStatus === 'syncing',
+    // Expiry = seamless editor -> view route change. The single always-mounted
+    // app keeps its workspace, camera (transform) and zoom, so there is no
+    // reload, no data loss and no visual jump - only editing becomes disabled.
+    onExpire: () => {
+      if (!activeProjectId || !activeTab) return;
+      const target = buildViewPath(activeProjectId, activeTab);
+      if (routeLocation.pathname !== target) routeNavigate(target);
+    },
+  });
+  // Stable ref so the edit funnel (takeSnapshot) can reset the session without
+  // taking a dependency on the hook's render output.
+  const editorSessionResetRef = useRef(null);
+  editorSessionResetRef.current = editorSession.reset;
   const [showProjectPanel, setShowProjectPanel] = useState(false);
   const [projectPanelMode, setProjectPanelMode] = useState('dashboard'); // dashboard, create, edit, switch, delete, changePassword
   const [projectNameInput, setProjectNameInput] = useState('');
@@ -2367,6 +2406,11 @@ export default function WorkflowApp() {
   const takeSnapshot = useCallback(() => {
     const newPast = [...pastRef.current, JSON.parse(JSON.stringify(stateRef.current))];
     updateHistory(newPast, []);
+    // A meaningful edit just happened (this funnels every mutating action:
+    // add/move/delete node, edit text, paste, draw connection, resize,
+    // group/ungroup, etc. - but never passive pan/zoom/select). Treat it as
+    // "I'm still actively working" and refresh the editor session countdown.
+    if (editorSessionResetRef.current) editorSessionResetRef.current();
   }, [updateHistory]);
 
   const performUndo = useCallback(() => {
@@ -6994,6 +7038,17 @@ export default function WorkflowApp() {
             <span className="text-xs shrink-0">💾</span>
             <span className="hidden sm:inline text-xs font-medium text-slate-500 whitespace-nowrap">Don't forget to export</span>
           </div>
+
+          {/* Editor session countdown - visible only on the editor route. Clicking
+              it (or any meaningful edit) resets to 5:00; at 0:00 the tab auto-
+              redirects to read-only View mode with the canvas/camera preserved. */}
+          <EditorSessionTimer
+            enabled={editorSession.enabled}
+            remainingSeconds={editorSession.remainingSeconds}
+            status={editorSession.status}
+            warningShown={editorSession.warningShown}
+            onReset={editorSession.reset}
+          />
         </div>
 
         <div className="relative flex items-center gap-0.5 sm:gap-1 shrink-0">

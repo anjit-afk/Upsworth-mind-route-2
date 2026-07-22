@@ -81,3 +81,21 @@ html, body, #root {
 .export-breathe {
   animation: export-breathe 3.5s ease-in-out 1;
 }
+
+
+/* Editor session timer - critical (last 10s) subtle pulse */
+@keyframes session-timer-pulse {
+  0%   { opacity: 1; }
+  50%  { opacity: 0.45; }
+  100% { opacity: 1; }
+}
+
+.session-timer-pulse {
+  animation: session-timer-pulse 1s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-timer-pulse {
+    animation: none;
+  }
+}
