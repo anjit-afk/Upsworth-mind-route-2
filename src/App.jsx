@@ -406,7 +406,7 @@ const DEFAULT_REMINDERS = [
   { id: 'r-8', title: 'Reset Your Mind', content: 'Feeling stuck? Take a moment to clear your thoughts before continuing.', icon: '\u{1F9E0}', enabled: true, frequency: 60, showOnWorkspaceOpen: false, randomMode: true, activeHours: null, lastShownAt: null, nextReminderAt: null, createdAt: Date.now() }
 ];
 
-const MARKDOWN_ZOOM_THRESHOLD = 0.6;
+const MARKDOWN_ZOOM_THRESHOLD = 0.25;
 // --- Canvas Zoom Limits ---
 // MIN_ZOOM lets very large mind maps be viewed entirely (down to 5%).
 // MAX_ZOOM is unchanged. All zoom interactions clamp to this range.
