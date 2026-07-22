@@ -6953,6 +6953,15 @@ export default function WorkflowApp() {
               </>
             )}
           </div>
+
+          {/* Workspace Manager Icon Button */}
+          <button
+            onClick={() => setShowWorkspaceManager(true)}
+            className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-500 hover:text-indigo-600 transition-colors shrink-0"
+            title="Manage Workspaces"
+          >
+            <Settings className="w-4 h-4" />
+          </button>
         </div>
 
         {/* --- Header Notification Indicators --- */}
@@ -7338,22 +7347,7 @@ export default function WorkflowApp() {
               </div>
             </div>
 
-            <div className="p-4 border-b border-slate-100">
-              <span className="text-xs font-bold text-slate-400 tracking-wider uppercase block mb-3">Workspaces</span>
-              <button
-                onClick={() => setShowWorkspaceManager(true)}
-                className="flex items-center justify-center gap-2 w-full px-3 py-2.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-sm font-semibold rounded-lg border border-indigo-200 transition-all"
-                title="Open Workspace Manager to create, rename, or delete workspaces"
-              >
-                <Settings className="w-4 h-4" />
-                Manage Workspaces
-              </button>
-              <p className="text-[10px] text-slate-400 mt-2 text-center leading-relaxed">
-                Create, rename, or delete workspaces.
-                <br />
-                Use the top bar to switch between them.
-              </p>
-            </div>
+
 
 
             <div className="p-4 border-b border-slate-100">
