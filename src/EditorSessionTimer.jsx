@@ -22,8 +22,10 @@ import {
   AMBER_THRESHOLD_SECONDS,
 } from './routing/useEditorSessionTimer';
 
-// Neutral pill color requested in the spec.
+// Neutral icon + digits color requested in the spec (#e0e0e0). Because the app
+// toolbar is light, this light-gray needs a dark chip behind it to be legible.
 const NEUTRAL_COLOR = '#e0e0e0';
+const NEUTRAL_PILL_BG = '#3f3f46'; // zinc-700-ish dark chip so #e0e0e0 reads clearly
 
 /**
  * @param {object}  props
@@ -65,9 +67,11 @@ export default function EditorSessionTimer({ enabled, remainingSeconds, status, 
     pillClass += ' bg-amber-50 border-amber-200 text-amber-600';
     pillStyle = undefined;
   } else {
-    // Neutral: blend into the bar, subtle border, #e0e0e0 icon + digits.
-    pillClass += ' bg-transparent hover:bg-slate-100/70';
-    pillStyle = { color: NEUTRAL_COLOR, borderColor: NEUTRAL_COLOR };
+    // Neutral: a small dark chip so the requested #e0e0e0 icon + digits stay
+    // legible on the light toolbar (light-gray text on white is invisible).
+    // Still subtle enough to "blend in" rather than distract.
+    pillClass += ' hover:brightness-110';
+    pillStyle = { backgroundColor: NEUTRAL_PILL_BG, color: NEUTRAL_COLOR, borderColor: NEUTRAL_PILL_BG };
   }
 
   // When flashed (just clicked), briefly invert to indigo so the click reads.
