@@ -25,7 +25,7 @@ import {
 // Neutral icon + digits color requested in the spec (#e0e0e0). Because the app
 // toolbar is light, this light-gray needs a dark chip behind it to be legible.
 const NEUTRAL_COLOR = '#e0e0e0';
-const NEUTRAL_PILL_BG = '#3f3f46'; // zinc-700-ish dark chip so #e0e0e0 reads clearly
+const NEUTRAL_PILL_BG = '#111827'; // near-black chip so #e0e0e0 is unmistakable on the light toolbar
 
 /**
  * @param {object}  props
