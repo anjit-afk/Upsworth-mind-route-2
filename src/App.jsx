@@ -407,6 +407,11 @@ const DEFAULT_REMINDERS = [
 ];
 
 const MARKDOWN_ZOOM_THRESHOLD = 0.6;
+// --- Canvas Zoom Limits ---
+// MIN_ZOOM lets very large mind maps be viewed entirely (down to 5%).
+// MAX_ZOOM is unchanged. All zoom interactions clamp to this range.
+const MIN_ZOOM = 0.05;
+const MAX_ZOOM = 3;
 const MAX_CARD_WIDTH = 600;
 const MAX_CARD_HEIGHT = 800;
 
@@ -775,8 +780,26 @@ export default function WorkflowApp() {
   const handleZoom = useCallback((delta) => {
     setTransform(prev => ({
       ...prev,
-      scale: Math.max(0.2, Math.min(3, prev.scale + delta))
+      scale: Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, prev.scale + delta))
     }));
+  }, []);
+
+  // Reset zoom to 100% while keeping the current viewport center fixed, so the
+  // canvas doesn't jump. Used by the clickable zoom-percentage indicator.
+  const resetZoom = useCallback(() => {
+    setTransform(prev => {
+      if (prev.scale === 1) return prev;
+      if (!workspaceRef.current) return { ...prev, scale: 1 };
+      const rect = workspaceRef.current.getBoundingClientRect();
+      const cx = rect.width / 2;
+      const cy = rect.height / 2;
+      const sf = 1 / prev.scale;
+      return {
+        scale: 1,
+        x: cx - sf * (cx - prev.x),
+        y: cy - sf * (cy - prev.y),
+      };
+    });
   }, []);
 
   const handleWheel = useCallback((e) => {
@@ -786,7 +809,7 @@ export default function WorkflowApp() {
     setIsAnimatingTransform(false);
     const delta = e.deltaY > 0 ? -0.1 : 0.1;
     setTransform(prev => {
-      const newScale = Math.max(0.2, Math.min(3, prev.scale + delta));
+      const newScale = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, prev.scale + delta));
       if (!workspaceRef.current) return prev;
       const rect = workspaceRef.current.getBoundingClientRect();
       const mouseX = e.clientX - rect.left;
@@ -847,7 +870,7 @@ export default function WorkflowApp() {
       const scaleDelta = dist / Math.max(touchRef.current.lastDist, 1);
 
       setTransform(prev => {
-        const newScale = Math.max(0.2, Math.min(3, prev.scale * scaleDelta));
+        const newScale = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, prev.scale * scaleDelta));
         if (!workspaceRef.current) return prev;
         const rect = workspaceRef.current.getBoundingClientRect();
         const localMidX = midX - rect.left;
@@ -8250,6 +8273,16 @@ export default function WorkflowApp() {
               </button>
               <div className="h-px w-5 bg-slate-200 my-0.5" />
               <button onClick={() => handleZoom(0.25)} className="p-1.5 sm:p-2 hover:bg-slate-100 text-slate-600 rounded-md transition-colors" title="Zoom In"><ZoomIn className="w-4 h-4 sm:w-5 sm:h-5"/></button>
+              {/* Live zoom percentage indicator - reflects transform.scale directly (no extra
+                  state / render overhead). Click to reset zoom to 100% (default level). */}
+              <button
+                onClick={resetZoom}
+                className="px-1 py-1 min-w-[2.5rem] sm:min-w-[2.75rem] text-[11px] sm:text-xs font-semibold text-slate-700 hover:bg-slate-100 rounded-md transition-colors tabular-nums text-center"
+                title="Current zoom - click to reset to 100%"
+                aria-label={`Current zoom ${Math.round(transform.scale * 100)} percent, click to reset to 100 percent`}
+              >
+                {Math.round(transform.scale * 100)}%
+              </button>
               <button onClick={() => setTransform({x:0, y:0, scale:1})} className="p-1.5 sm:p-2 hover:bg-slate-100 text-slate-600 rounded-md transition-colors" title="Reset View"><Focus className="w-4 h-4 sm:w-5 sm:h-5"/></button>
               <button onClick={() => handleZoom(-0.25)} className="p-1.5 sm:p-2 hover:bg-slate-100 text-slate-600 rounded-md transition-colors" title="Zoom Out"><ZoomOut className="w-4 h-4 sm:w-5 sm:h-5"/></button>
               <div className="h-px w-5 bg-slate-200 my-0.5" />
