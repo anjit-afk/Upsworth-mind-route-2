@@ -20,6 +20,7 @@ import { clampPanelPct, DEFAULT_PANEL_PCT } from './PanelResize';
 import MarkdownRenderer from './MarkdownRenderer';
 import CardEditorPanel from './CardEditorPanel';
 import WorkspaceManager from './WorkspaceManager';
+import EditorSessionTimer from './EditorSessionTimer';
 import { useAnimatedMount } from './animations';
 import { parseRouteIntent, buildEditorPath, buildViewPath } from './routing/useRouteIntent';
 import { isFirebaseConfigured } from './firebase';
@@ -439,6 +440,12 @@ function migrateStaleImageUrls(workspaces) {
     })
   }));
 }
+
+// Bounded wait for pending saves to flush before the editor-session timer
+// converts a tab to read-only. Online, a Firestore write settles well within
+// this; offline it can hang forever, so we cap the wait and proceed (local data
+// is safe and the sync engine's retry queue uploads later).
+const EDITOR_SESSION_FLUSH_TIMEOUT_MS = 4000;
 
 export default function WorkflowApp() {
   // --- Core State ---
@@ -2302,6 +2309,64 @@ export default function WorkflowApp() {
       routeNavigate(target, { replace: true });
     }
   }, [initialized, activeProjectId, activeTab, routeLocation.pathname, routeNavigate, isReferenceMode]);
+
+  // --- Editor Session Timer: seamless editor -> view redirect on expiry ---
+  // Called once by EditorSessionTimer when its 5:00 countdown hits zero. This is
+  // a ROUTE-ONLY change: because the app is mounted once (never remounts across
+  // routes), navigating editor -> view keeps workspaces, active project, active
+  // workspace, camera position and zoom exactly as they are in memory. The user
+  // simply continues viewing the SAME canvas, now read-only. No reload, no data
+  // loss, no visual jump - only editing is disabled.
+  //
+  // Sync safety: if a save is still pending, flush it FIRST and reject so the
+  // timer defers (retries next tick) until the flush settles - the redirect can
+  // never race an in-progress synchronization. This function performs no writes
+  // of its own beyond flushing already-queued saves, so the sync engine is
+  // otherwise untouched.
+  // The session timer runs ONLY on a live editor route with a resolved target.
+  const editorSessionTimerActive =
+    initialized && !isReferenceMode && !!activeProjectId && !!activeTab;
+  // Pause the countdown while any blocking flow is open (conflict resolution,
+  // clear-canvas confirm, device naming, restore confirm) so it never fires a
+  // redirect out from under a modal the user is interacting with.
+  const editorSessionTimerBlocked =
+    (pendingConflicts && pendingConflicts.length > 0) ||
+    showConfirmClear ||
+    showDevicePicker ||
+    !!confirmRestoreId;
+  // Live mirror of the blocked flag so the async expire handler can re-check it
+  // AFTER awaiting a save flush (a dialog may open during that brief window).
+  const editorSessionTimerBlockedRef = useRef(editorSessionTimerBlocked);
+  editorSessionTimerBlockedRef.current = editorSessionTimerBlocked;
+
+  const handleEditorSessionExpire = useCallback(async ({ isCancelled } = {}) => {
+    const projectId = activeProjectIdRef.current;
+    const workspaceId = activeTabRef.current;
+    if (!projectId || !workspaceId) return;
+    // Guard: never redirect a tab that is already in reference/view mode.
+    if (parseRouteIntent(routeLocation.pathname).mode === 'reference') return;
+    // Wait for any in-flight/pending sync so the redirect never races a save,
+    // but only for a BOUNDED window. Firestore writes can hang indefinitely
+    // while offline (they neither resolve nor reject), so we race the flush
+    // against a deadline and proceed regardless once it elapses. This is safe:
+    // the edit is already persisted locally and the sync engine keeps its own
+    // retry queue, so it will upload later - and it prevents the countdown from
+    // freezing forever at 0:00 (and avoids any retry storm).
+    if (isFirebaseConfigured() && hasDirtyDocs(projectId)) {
+      await Promise.race([
+        flushPendingServerSaves().catch(() => {}),
+        new Promise((resolve) => { setTimeout(resolve, EDITOR_SESSION_FLUSH_TIMEOUT_MS); }),
+      ]);
+    }
+    // Re-check state that may have changed while we were flushing: the user may
+    // have reset the session ("Stay in Editor"), a blocking dialog may have
+    // opened, or the tab may already have left the editor route.
+    if (isCancelled && isCancelled()) return;
+    if (editorSessionTimerBlockedRef.current) return;
+    if (parseRouteIntent(routeLocation.pathname).mode === 'reference') return;
+    // Route-only transition (push, so the user can navigate Back to the editor).
+    routeNavigate(buildViewPath(projectId, workspaceId));
+  }, [routeNavigate, routeLocation.pathname]);
 
   useEffect(() => {
     setFocusedNodeId(null);
@@ -6997,6 +7062,17 @@ export default function WorkflowApp() {
         </div>
 
         <div className="relative flex items-center gap-0.5 sm:gap-1 shrink-0">
+          {/* --- Editor Session Timer (editor route only) --- */}
+          {editorSessionTimerActive && (
+            <>
+              <EditorSessionTimer
+                blocked={editorSessionTimerBlocked}
+                onExpire={handleEditorSessionExpire}
+              />
+              <div className="w-px h-5 sm:h-6 bg-slate-200 mx-0.5 sm:mx-1"></div>
+            </>
+          )}
+
           {/* --- Trust status chip (Phase 2) --- */}
           {(() => {
             // nowTick keeps relative times fresh; referenced so re-renders recompute.
