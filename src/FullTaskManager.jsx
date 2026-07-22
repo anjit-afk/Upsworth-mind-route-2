@@ -454,16 +454,9 @@ export default function FullTaskManager({
             <span className="hidden sm:inline">Group</span>
           </button>
 
-          {/* New Task */}
-          {!isPreviewMode && (
-          <button
-            onClick={() => setShowNewTaskForm(!showNewTaskForm)}
-            className="flex items-center gap-1 px-2 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-semibold rounded transition-colors"
-          >
-            <Plus className="w-3 h-3" />
-            Task
-          </button>
-          )}
+          {/* Note: "Add Task" now lives in the floating action button (FAB)
+              at the bottom-right of the panel so it stays reachable on small
+              screens without needing to resize/zoom the panel. */}
 
           {/* Close */}
           <button
@@ -565,8 +558,10 @@ export default function FullTaskManager({
         </div>
       )}
 
-      {/* Main Content - Group sections */}
-      <div className="flex-1 overflow-y-auto">
+      {/* Main Content - Group sections.
+          Extra bottom padding (when the FAB is visible) ensures the last rows
+          can scroll clear of the floating Add Task button. */}
+      <div className={`flex-1 overflow-y-auto ${!isPreviewMode && !deleteMode ? 'pb-24' : ''}`}>
         {sortedGroups.map(group => {
           const groupTasks = groupedTasks[group.id] || [];
           const isCollapsed = collapsedGroups[group.id];
@@ -1063,6 +1058,24 @@ export default function FullTaskManager({
           );
         })}
       </div>
+
+      {/* Floating Action Button - Add Task.
+          Positioned absolutely within the panel so it floats above the task
+          list and stays fixed while the list scrolls. Always reachable
+          regardless of panel width, unlike a toolbar button that can overflow
+          on small screens. */}
+      {!isPreviewMode && !deleteMode && (
+        <button
+          onClick={() => setShowNewTaskForm(!showNewTaskForm)}
+          className="absolute bottom-5 right-5 z-40 flex items-center justify-center w-14 h-14 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg hover:shadow-xl transition-all hover:scale-105 active:scale-95"
+          title={showNewTaskForm ? 'Close new task form' : 'Add Task'}
+          aria-label={showNewTaskForm ? 'Close new task form' : 'Add Task'}
+        >
+          {showNewTaskForm
+            ? <X className="w-6 h-6" />
+            : <Plus className="w-6 h-6" />}
+        </button>
+      )}
 
       {/* Delete Confirmation Modal */}
       {showDeleteConfirm && (
