@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef } from 'react';
+import { Minus, Plus } from 'lucide-react';
 
 // Shared width configuration for right-docked side panels (Pins, Tasks).
 // Width is expressed as a percentage of the viewport so "40%" means the
@@ -7,6 +8,8 @@ export const MIN_PANEL_PCT = 25;
 export const MAX_PANEL_PCT = 75;
 export const DEFAULT_PANEL_PCT = 40;
 export const PANEL_WIDTH_PRESETS = [30, 40, 50, 60, 70];
+// Increment used by the compact width stepper (+ / -) control.
+export const PANEL_WIDTH_STEP = 5;
 
 export function clampPanelPct(pct) {
   if (typeof pct !== 'number' || isNaN(pct)) return DEFAULT_PANEL_PCT;
@@ -63,26 +66,47 @@ export function PanelResizeHandle({ onChange }) {
 }
 
 /**
- * Compact preset buttons for jumping to common panel widths.
+ * Compact width stepper: [-] 40% [+].
+ *
+ * Replaces the previous row of individual percentage presets to save
+ * horizontal space in panel toolbars. The minus/plus buttons adjust the
+ * panel width by PANEL_WIDTH_STEP within the clamped min/max range, and the
+ * current percentage is displayed between them.
  */
 export function PanelWidthPresets({ widthPct, onChange, className = '' }) {
-  const current = Math.round(widthPct);
+  const current = Math.round(clampPanelPct(widthPct));
+  const atMin = current <= MIN_PANEL_PCT;
+  const atMax = current >= MAX_PANEL_PCT;
+
+  const decrease = () => onChange(clampPanelPct(current - PANEL_WIDTH_STEP));
+  const increase = () => onChange(clampPanelPct(current + PANEL_WIDTH_STEP));
+
   return (
-    <div className={`flex items-center gap-0.5 ${className}`} title="Panel width">
-      {PANEL_WIDTH_PRESETS.map(p => (
-        <button
-          key={p}
-          onClick={() => onChange(p)}
-          className={`px-1 py-0.5 text-[9px] font-semibold rounded transition-colors ${
-            current === p
-              ? 'bg-indigo-100 text-indigo-700'
-              : 'text-slate-400 hover:text-slate-600 hover:bg-slate-200'
-          }`}
-          title={`${p}% of display width`}
-        >
-          {p}%
-        </button>
-      ))}
+    <div
+      className={`flex items-center gap-0.5 bg-white border border-slate-200 rounded ${className}`}
+      title="Panel width"
+    >
+      <button
+        onClick={decrease}
+        disabled={atMin}
+        className="p-1 rounded text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+        title="Narrower panel"
+        aria-label="Narrower panel"
+      >
+        <Minus className="w-3 h-3" />
+      </button>
+      <span className="text-[10px] font-semibold text-slate-600 tabular-nums w-8 text-center select-none">
+        {current}%
+      </span>
+      <button
+        onClick={increase}
+        disabled={atMax}
+        className="p-1 rounded text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+        title="Wider panel"
+        aria-label="Wider panel"
+      >
+        <Plus className="w-3 h-3" />
+      </button>
     </div>
   );
 }
