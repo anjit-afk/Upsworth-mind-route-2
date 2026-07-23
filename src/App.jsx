@@ -9,7 +9,7 @@ import {
   MoreVertical, ImageIcon, ChevronUp, Scissors, ClipboardPaste,
   Lock, Shield, Eye, EyeOff, GitBranch, Map, Timer,
   MapPin, Bell, Pencil, MousePointer, ListTodo, Cloud, CloudOff, Loader,
-  AlertTriangle, Settings
+  AlertTriangle, Settings, Maximize2, Minimize2
 } from 'lucide-react';
 import MiniMap from './MiniMap';
 import PinPanel, { PIN_ICONS } from './PinPanel';
@@ -608,6 +608,14 @@ export default function WorkflowApp() {
   // --- Mini Map States ---
   const [showMiniMap, setShowMiniMap] = useState(false);
   const [miniMapOpenedViaShortcut, setMiniMapOpenedViaShortcut] = useState(false);
+
+  // --- Focus Mode (Immersive Canvas) States ---
+  // View-route-only presentation feature. `isFocusMode` hides ALL application
+  // UI so only the canvas + its objects remain. `focusUsedFullscreenRef` records
+  // whether we successfully entered true browser fullscreen (vs. the app-focus
+  // fallback) so we can react correctly to the browser's own Esc/F11 exit.
+  const [isFocusMode, setIsFocusMode] = useState(false);
+  const focusUsedFullscreenRef = useRef(false);
 
   // --- Pin System States ---
   const [showPinPanel, setShowPinPanel] = useState(false);
@@ -2583,6 +2591,101 @@ export default function WorkflowApp() {
     });
   }, [isPreviewActive, isReferenceMode]);
   toggleEditingStateRef.current = toggleEditingState;
+
+  // =========================================================================
+  // FOCUS MODE (Immersive Canvas) - VIEW ROUTE ONLY
+  // =========================================================================
+  // A pure presentation feature, available ONLY on the read-only View route
+  // (isReferenceMode). It uses the browser Fullscreen API to hide browser
+  // chrome (address bar, tabs, bookmarks bar, OS taskbar/dock) and hides ALL
+  // application UI so only the canvas and its objects remain - like a dedicated
+  // presentation app. If true fullscreen is unavailable, it falls back to an
+  // in-app "App Focus Mode" that still hides all application UI.
+  //
+  // ISOLATION: this touches NOTHING but local UI state + the Fullscreen API.
+  // It never reads/writes routing, autosave, sync, storage or editing logic.
+  // The camera (`transform`: zoom + position) is React state that we never
+  // modify here, so zoom level and canvas position are preserved automatically
+  // across enter/exit.
+  const enterFocusMode = useCallback(async () => {
+    if (!isReferenceMode) return; // View route only - never in the editor
+    const el = document.documentElement;
+    const req = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen;
+    if (req) {
+      try {
+        await req.call(el);
+        focusUsedFullscreenRef.current = true;
+      } catch {
+        // Fullscreen was blocked/failed - fall back to app-focus mode only.
+        focusUsedFullscreenRef.current = false;
+      }
+    } else {
+      // Fullscreen API unavailable - use the app-focus fallback.
+      focusUsedFullscreenRef.current = false;
+    }
+    setIsFocusMode(true);
+  }, [isReferenceMode]);
+
+  const exitFocusMode = useCallback(async () => {
+    const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+    if (fsEl) {
+      const exit = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen;
+      if (exit) { try { await exit.call(document); } catch { /* ignore */ } }
+    }
+    focusUsedFullscreenRef.current = false;
+    setIsFocusMode(false);
+  }, []);
+
+  const toggleFocusMode = useCallback(() => {
+    if (isFocusMode) exitFocusMode();
+    else enterFocusMode();
+  }, [isFocusMode, enterFocusMode, exitFocusMode]);
+
+  // Keep our state in sync when the user leaves true browser fullscreen by any
+  // means the app didn't drive (Esc, F11, browser UI). Only react when WE
+  // entered real fullscreen, so the app-focus fallback isn't torn down here.
+  useEffect(() => {
+    const onFsChange = () => {
+      const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+      if (!fsEl && focusUsedFullscreenRef.current) {
+        focusUsedFullscreenRef.current = false;
+        setIsFocusMode(false);
+      }
+    };
+    document.addEventListener('fullscreenchange', onFsChange);
+    document.addEventListener('webkitfullscreenchange', onFsChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', onFsChange);
+      document.removeEventListener('webkitfullscreenchange', onFsChange);
+    };
+  }, []);
+
+  // Keyboard: Shift+F toggles Focus Mode (View route only). Escape exits the
+  // app-focus fallback (in true fullscreen the browser consumes Esc and the
+  // fullscreenchange handler above restores our state).
+  useEffect(() => {
+    if (!isReferenceMode) return;
+    const handleFocusModeKey = (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT' || e.target.isContentEditable) return;
+      if ((e.key === 'F' || e.key === 'f') && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        toggleFocusMode();
+        return;
+      }
+      if (e.key === 'Escape' && isFocusMode && !focusUsedFullscreenRef.current) {
+        e.preventDefault();
+        exitFocusMode();
+      }
+    };
+    window.addEventListener('keydown', handleFocusModeKey);
+    return () => window.removeEventListener('keydown', handleFocusModeKey);
+  }, [isReferenceMode, isFocusMode, toggleFocusMode, exitFocusMode]);
+
+  // Safety: if this tab ever stops being a View/reference tab while focused,
+  // leave Focus Mode so it can never linger outside its intended route.
+  useEffect(() => {
+    if (!isReferenceMode && isFocusMode) exitFocusMode();
+  }, [isReferenceMode, isFocusMode, exitFocusMode]);
 
   // --- Copy/Cut/Paste Node Functions ---
   const copyNode = useCallback((nodeId) => {
@@ -6949,7 +7052,7 @@ export default function WorkflowApp() {
     <div className="flex flex-col h-screen w-full bg-[#f8fafc] font-sans text-slate-800 selection:bg-indigo-100 overflow-hidden">
 
       {/* --- Reference (read-only) banner --- */}
-      {isReferenceMode && (
+      {isReferenceMode && !isFocusMode && (
         <div className="shrink-0 flex items-center justify-center gap-2 sm:gap-3 px-3 py-1.5 bg-amber-100 border-b border-amber-300 text-amber-900 text-xs sm:text-sm font-semibold z-[60]">
           <Eye className="w-4 h-4 shrink-0" />
           <span className="truncate">Reference view (read-only snapshot). Editing, saving, importing and switching are disabled here.</span>
@@ -6977,7 +7080,7 @@ export default function WorkflowApp() {
       )}
 
       {/* --- Version-preview banner (reference tabs previewing a past snapshot) --- */}
-      {isReferenceMode && previewingVersion && (
+      {isReferenceMode && previewingVersion && !isFocusMode && (
         <div className="shrink-0 flex items-center justify-center gap-2 sm:gap-3 px-3 py-1.5 bg-blue-100 border-b border-blue-300 text-blue-900 text-xs sm:text-sm font-semibold z-[60]">
           <Timer className="w-4 h-4 shrink-0" />
           <span className="truncate">Previewing an old version: {previewingVersion.label} — this is a snapshot, not your live data.</span>
@@ -6991,7 +7094,8 @@ export default function WorkflowApp() {
         </div>
       )}
 
-      {/* --- Top Command Toolbar --- */}
+      {/* --- Top Command Toolbar (hidden entirely in Focus Mode) --- */}
+      {!isFocusMode && (
       <header className={`h-10 bg-white/50 backdrop-blur-sm border-b border-slate-200/80 flex items-center px-2 sm:px-3 z-50 justify-between shrink-0 gap-1 sm:gap-2 hover:bg-white/90 transition-all duration-300 ${isPreviewMode ? 'border-t-2 border-t-amber-400' : ''}`}>
         <div className="flex items-center gap-1.5 sm:gap-3 min-w-0 flex-1">
           <button 
@@ -7280,6 +7384,18 @@ export default function WorkflowApp() {
           </button>
           </>)}
 
+          {/* Focus Mode (Immersive Canvas) - View route only, never in the editor */}
+          {isReferenceMode && (
+            <button
+              onClick={toggleFocusMode}
+              className="flex items-center gap-1 px-1.5 sm:px-2.5 py-1 rounded-lg text-xs font-bold transition-all border bg-slate-50 border-slate-200 text-slate-600 hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200"
+              title="Focus Mode - immersive, distraction-free full screen canvas (Shift+F)"
+            >
+              <Maximize2 className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Focus Mode</span>
+            </button>
+          )}
+
           <div className="w-px h-5 sm:h-6 bg-slate-200 mx-0.5 sm:mx-1"></div>
 
           {/* Always-visible Undo/Redo buttons */}
@@ -7339,13 +7455,14 @@ export default function WorkflowApp() {
           )}
         </div>
       </header>
+      )}
 
 
       {/* --- Workspace Panel Layout --- */}
       <div className="flex-1 flex overflow-hidden w-full relative">
         
         {/* --- Left Sidebar Overlay backdrop (mobile only) --- */}
-        {showSidebar && (
+        {showSidebar && !isFocusMode && (
           <div 
             className="fixed inset-0 bg-slate-900/30 backdrop-blur-sm z-30 md:hidden"
             onClick={() => setShowSidebar(false)}
@@ -7353,7 +7470,7 @@ export default function WorkflowApp() {
         )}
 
         {/* --- Left Sidebar --- */}
-        {showSidebar && (
+        {showSidebar && !isFocusMode && (
           <aside className="w-[calc(100vw-3rem)] max-w-80 bg-white border-r border-slate-200 flex flex-col shrink-0 z-40 animate-sidebar-in fixed md:relative inset-y-0 left-0 top-10 md:top-0 shadow-xl md:shadow-none overflow-y-auto">
             <div className="p-4 border-b border-slate-100">
               <div className="flex flex-col gap-2">
@@ -7521,7 +7638,7 @@ export default function WorkflowApp() {
           onTouchEnd={handleTouchEnd}
           onDragOver={(e) => e.preventDefault()}
           onDrop={handleCanvasImageDrop}
-          style={{ display: viewMode === 'canvas' ? undefined : 'none' }}
+          style={{ display: (viewMode === 'canvas' || isFocusMode) ? undefined : 'none' }}
         >
           {/* Panning grid backdrop */}
           <div className="absolute inset-0 canvas-grid-clickable cursor-crosshair active:cursor-grabbing opacity-60" style={{
@@ -7531,8 +7648,8 @@ export default function WorkflowApp() {
             transition: isAnimatingTransform ? 'background-size 250ms ease-out, background-position 250ms ease-out' : 'none'
           }} />
 
-          {/* Floating Mode Indicator Badge */}
-          <div className="absolute bottom-4 left-4 z-[100] pointer-events-none animate-fade-in">
+          {/* Floating Mode Indicator Badge (hidden in Focus Mode) */}
+          <div className={`absolute bottom-4 left-4 z-[100] pointer-events-none animate-fade-in ${isFocusMode ? 'hidden' : ''}`}>
             <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold shadow-lg border backdrop-blur-sm transition-all duration-200 ${
               isPreviewMode
                 ? 'bg-amber-900/80 border-amber-500/50 text-amber-200'
@@ -8170,12 +8287,12 @@ export default function WorkflowApp() {
             transform={transform}
             setTransform={setTransform}
             workspaceRef={workspaceRef}
-            visible={showMiniMap}
+            visible={showMiniMap && !isFocusMode}
             openedViaShortcut={miniMapOpenedViaShortcut}
           />
 
           {/* --- Bottom-Right Floating Zoom and Guides --- */}
-          <div className={`absolute bottom-4 right-4 sm:bottom-6 sm:right-6 z-50 ${showTimer ? 'opacity-100' : 'opacity-50 hover:opacity-100'} transition-opacity duration-300`}>
+          <div className={`absolute bottom-4 right-4 sm:bottom-6 sm:right-6 z-50 ${showTimer ? 'opacity-100' : 'opacity-50 hover:opacity-100'} transition-opacity duration-300 ${isFocusMode ? 'hidden' : ''}`}>
 
             {/* Timer Panel - absolutely positioned above toolbar */}
             {showTimer && (
@@ -8261,6 +8378,17 @@ export default function WorkflowApp() {
                 title="Open this workspace in a new read-only Reference tab"
               >
                 <ExternalLink className="w-4 h-4 sm:w-5 sm:h-5" />
+              </button>
+              <div className="h-px w-5 bg-slate-200 my-0.5" />
+              </>)}
+              {/* Focus Mode toggle - View route only (immersive canvas) */}
+              {isReferenceMode && (<>
+              <button
+                onClick={toggleFocusMode}
+                className="p-1.5 sm:p-2 rounded-md transition-colors text-slate-600 hover:bg-indigo-50 hover:text-indigo-600"
+                title="Focus Mode - immersive full screen canvas (Shift+F)"
+              >
+                <Maximize2 className="w-4 h-4 sm:w-5 sm:h-5" />
               </button>
               <div className="h-px w-5 bg-slate-200 my-0.5" />
               </>)}
@@ -8524,7 +8652,7 @@ export default function WorkflowApp() {
         </main>
 
         {/* --- Clone Panels (Three-Panel Split View) --- */}
-        {showClonePanel && viewMode === 'canvas' && (() => {
+        {showClonePanel && viewMode === 'canvas' && !isFocusMode && (() => {
           // Find all source nodes that have clones across ALL workspaces
           const allCloneSourceIds = new Set();
           workspaces.forEach(ws => {
@@ -8698,7 +8826,7 @@ export default function WorkflowApp() {
         })()}
 
         {/* --- Pin Panel --- */}
-        {pinPanelMount.shouldRender && (
+        {pinPanelMount.shouldRender && !isFocusMode && (
           <PinPanel
             className={pinPanelMount.animationClass}
             workspaces={workspaces}
@@ -8720,7 +8848,7 @@ export default function WorkflowApp() {
         )}
 
         {/* --- Reminder Panel --- */}
-        {reminderPanelMount.shouldRender && (
+        {reminderPanelMount.shouldRender && !isFocusMode && (
           <ReminderPanel
             className={reminderPanelMount.animationClass}
             reminders={reminders}
@@ -8752,7 +8880,7 @@ export default function WorkflowApp() {
         )}
 
         {/* --- Card Editor Panel --- */}
-        {cardEditorMount.shouldRender && (
+        {cardEditorMount.shouldRender && !isFocusMode && (
           <CardEditorPanel
             className={cardEditorMount.animationClass}
             selectedNode={cardEditorNode}
@@ -8771,7 +8899,7 @@ export default function WorkflowApp() {
         )}
 
         {/* --- Full Task Manager (side panel / fullscreen) --- */}
-        {taskPanelMount.shouldRender && (
+        {taskPanelMount.shouldRender && !isFocusMode && (
           <FullTaskManager
             className={taskPanelMount.animationClass}
             tasks={tasks}
@@ -8803,7 +8931,7 @@ export default function WorkflowApp() {
         )}
 
         {/* --- Outline Backlog Board View --- */}
-        {viewMode === 'outline' && (
+        {viewMode === 'outline' && !isFocusMode && (
           <div className="flex-1 overflow-hidden flex flex-col bg-slate-50 animate-content-in">
             <div className="px-3 sm:px-6 py-3 bg-white border-b border-slate-200 flex items-center justify-between shrink-0 gap-2">
               <div className="min-w-0">
@@ -8897,7 +9025,7 @@ export default function WorkflowApp() {
       })()}
 
       {/* --- Return-from-idle freshness toast --- */}
-      {freshnessToast && (
+      {freshnessToast && !isFocusMode && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[390] animate-toast-in">
           <div className="bg-slate-800 text-white text-xs rounded-full px-4 py-2 shadow-lg flex items-center gap-2">
             <span>{freshnessToast.reason === 'restored' ? '↺ Restored an earlier version' : `↻ Loaded the latest from the cloud (edited on ${freshnessToast.device})`}</span>
@@ -8985,7 +9113,7 @@ export default function WorkflowApp() {
 
 
       {/* --- Mobile Card Action Bottom Sheet --- */}
-      {mobileSheet && (() => {
+      {mobileSheet && !isFocusMode && (() => {
         const sheetNode = nodes.find(n => n.id === mobileSheet);
         if (!sheetNode) return null;
         const sheetTheme = THEMES[sheetNode.theme] || THEMES.blue;
@@ -9137,7 +9265,7 @@ export default function WorkflowApp() {
       {projectPanelMount.shouldRender && renderProjectPanel(false, projectPanelMount.isExiting)}
 
       {/* --- Timer Running Countdown (when panel closed) --- */}
-      {timerRunning && !showTimer && (
+      {timerRunning && !showTimer && !isFocusMode && (
         <div
           className={`fixed top-12 left-1/2 -translate-x-1/2 z-[51] hover:opacity-90 transition-opacity cursor-pointer bg-white/80 backdrop-blur-sm rounded-lg shadow-sm border border-slate-200/50 px-2.5 py-1.5 flex items-center gap-1.5 ${timerPaused ? 'opacity-70' : 'opacity-50'}`}
           onClick={() => setShowTimer(true)}
@@ -9157,14 +9285,14 @@ export default function WorkflowApp() {
       )}
 
       {/* --- Toast Notification --- */}
-      {toastMount.shouldRender && (
+      {toastMount.shouldRender && !isFocusMode && (
         <div className={`fixed bottom-20 left-1/2 -translate-x-1/2 z-[90] px-4 py-2 bg-slate-800 text-white text-sm font-medium rounded-full shadow-lg ${toastMount.animationClass}`}>
           {effectiveToast}
         </div>
       )}
 
       {/* --- Timer Complete Notification --- */}
-      {timerNotification && (
+      {timerNotification && !isFocusMode && (
         <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[90] animate-banner-in">
           <div className="bg-white/95 backdrop-blur-md rounded-xl shadow-xl border border-orange-200 px-4 py-3 flex items-center gap-3">
             <span className="text-xl">⏰</span>
@@ -9180,7 +9308,7 @@ export default function WorkflowApp() {
       )}
 
       {/* --- Reminder Notification Toast --- */}
-      {activeReminderNotification && (
+      {activeReminderNotification && !isFocusMode && (
         <div className="fixed bottom-28 left-1/2 -translate-x-1/2 z-[85] animate-toast-in max-w-sm w-full mx-4">
           <div className="bg-white/95 backdrop-blur-md rounded-xl shadow-xl border border-slate-200 px-4 py-3 flex items-start gap-3">
             <span className="text-2xl shrink-0">{activeReminderNotification.icon}</span>
@@ -9253,6 +9381,21 @@ export default function WorkflowApp() {
             </div>
           </div>
         </>
+      )}
+
+      {/* --- Focus Mode exit control (only affordance rendered in Focus Mode) --- */}
+      {/* Deliberately minimal & subtle so the canvas stays the sole focus. The  */}
+      {/* user can also exit with Esc or Shift+F. */}
+      {isFocusMode && (
+        <button
+          onClick={exitFocusMode}
+          className="fixed top-3 right-3 z-[9999] flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-slate-900/40 hover:bg-slate-900/80 text-white/70 hover:text-white backdrop-blur-sm shadow-lg opacity-20 hover:opacity-100 transition-all duration-200"
+          title="Exit Focus Mode (Esc)"
+          aria-label="Exit Focus Mode"
+        >
+          <Minimize2 className="w-4 h-4" />
+          <span className="text-xs font-semibold hidden sm:inline">Exit</span>
+        </button>
       )}
 
       <style dangerouslySetInnerHTML={{__html: `
