@@ -633,12 +633,20 @@ export default function WorkflowApp() {
   const [reminders, setReminders] = useState([]);
   const [showReminderPanel, setShowReminderPanel] = useState(false);
   const [showCardEditorPanel, setShowCardEditorPanel] = useState(false);
+  // `reminderNotificationQueue` is the PENDING buffer: the scheduler pushes due
+  // reminders here (unchanged). A separate consumer releases them onto the
+  // screen one every few seconds into `visibleReminders` (the on-screen stack).
   const [reminderNotificationQueue, setReminderNotificationQueue] = useState([]);
+  const [visibleReminders, setVisibleReminders] = useState([]); // on-screen stack (max 3)
   const [sessionStartTime] = useState(Date.now());
   const reminderCheckIntervalRef = useRef(null);
-  const reminderNotificationTimerRef = useRef(null);
   const lastSessionNotifiedAtRef = useRef(Date.now());
   const reminderNotificationRef = useRef(null);
+  // Consumer coordination (avoids stale-closure reads inside the ticking interval)
+  const reminderPendingRef = useRef([]);
+  const reminderVisibleRef = useRef([]);
+  const lastReminderReleaseAtRef = useRef(0);
+  const reminderNotifKeyRef = useRef(0);
 
   // --- Timer States ---
   const [showTimer, setShowTimer] = useState(false);
@@ -3674,22 +3682,76 @@ export default function WorkflowApp() {
   }, [initialized, sessionStartTime]);
 
   // --- Reminder Notification Queue Consumer & Auto-Dismiss ---
-  const activeReminderNotification = reminderNotificationQueue.length > 0 ? reminderNotificationQueue[0] : null;
+  // Presentation tuning. A new reminder slides in every STAGGER_MS; each one
+  // lives for LIFETIME_MS (= STACK_MAX * STAGGER_MS) before it leaves, so at
+  // most STACK_MAX are ever on screen together. Example (4s / 12s / 3):
+  //   0s R1 in | 4s R2 in (R1 up) | 8s R3 in | 12s R1 out + R4 in | ...
+  const REMINDER_STACK_MAX = 3;
+  const REMINDER_STAGGER_MS = 4000;
+  const REMINDER_LIFETIME_MS = REMINDER_STACK_MAX * REMINDER_STAGGER_MS;
 
-  const dismissReminderNotification = useCallback(() => {
-    setReminderNotificationQueue(q => q.slice(1));
+  // Keep refs in sync so the ticking consumer below reads fresh values without
+  // being torn down/recreated on every queue change.
+  useEffect(() => { reminderPendingRef.current = reminderNotificationQueue; }, [reminderNotificationQueue]);
+  useEffect(() => { reminderVisibleRef.current = visibleReminders; }, [visibleReminders]);
+
+  // Preserve the scheduler's original "don't start a new batch while something
+  // is showing" guard: it checks reminderNotificationRef.current, so keep it
+  // truthy whenever anything is pending OR still on screen.
+  useEffect(() => {
+    reminderNotificationRef.current =
+      (reminderNotificationQueue.length > 0 || visibleReminders.length > 0) ? true : null;
+  }, [reminderNotificationQueue, visibleReminders]);
+
+  // Dismiss a single on-screen reminder by its stable key (X button).
+  const dismissReminderNotification = useCallback((key) => {
+    setVisibleReminders(prev => prev.filter(n => n.key !== key));
   }, []);
 
+  // --- Reminder Notification Queue Consumer (stagger in + auto-expire) ---
+  // A single lightweight ticker: expire notifications past their lifetime, then
+  // release the next pending reminder once a slot is free and STAGGER_MS has
+  // elapsed since the last release. Reading/writing via refs keeps the interval
+  // stable and free of stale-closure bugs.
   useEffect(() => {
-    reminderNotificationRef.current = activeReminderNotification;
-    if (activeReminderNotification) {
-      if (reminderNotificationTimerRef.current) clearTimeout(reminderNotificationTimerRef.current);
-      reminderNotificationTimerRef.current = setTimeout(() => {
-        dismissReminderNotification();
-      }, 8000);
-    }
-    return () => { if (reminderNotificationTimerRef.current) clearTimeout(reminderNotificationTimerRef.current); };
-  }, [activeReminderNotification, dismissReminderNotification]);
+    const tick = () => {
+      const now = Date.now();
+      let visible = reminderVisibleRef.current;
+      let changed = false;
+
+      // 1. Expire anything that has outlived its lifetime (oldest leaves first).
+      const kept = visible.filter(n => now - n.appearedAt < REMINDER_LIFETIME_MS);
+      if (kept.length !== visible.length) {
+        visible = kept;
+        changed = true;
+      }
+
+      // 2. Release the next pending reminder if there is room and enough time
+      //    has passed since the previous one appeared.
+      const pending = reminderPendingRef.current;
+      if (
+        pending.length > 0 &&
+        visible.length < REMINDER_STACK_MAX &&
+        now - lastReminderReleaseAtRef.current >= REMINDER_STAGGER_MS
+      ) {
+        const [next, ...rest] = pending;
+        const item = { ...next, key: ++reminderNotifKeyRef.current, appearedAt: now };
+        visible = [...visible, item];
+        lastReminderReleaseAtRef.current = now;
+        reminderPendingRef.current = rest;
+        setReminderNotificationQueue(rest);
+        changed = true;
+      }
+
+      if (changed) {
+        reminderVisibleRef.current = visible;
+        setVisibleReminders(visible);
+      }
+    };
+
+    const interval = setInterval(tick, 250);
+    return () => clearInterval(interval);
+  }, [REMINDER_LIFETIME_MS, REMINDER_STACK_MAX, REMINDER_STAGGER_MS]);
 
   // ============================================================
   // Animated mount/unmount wiring (PRESENTATION ONLY)
@@ -9307,22 +9369,30 @@ export default function WorkflowApp() {
         </div>
       )}
 
-      {/* --- Reminder Notification Toast --- */}
-      {activeReminderNotification && !isFocusMode && (
-        <div className="fixed bottom-28 left-1/2 -translate-x-1/2 z-[85] animate-toast-in max-w-sm w-full mx-4">
-          <div className="bg-white/95 backdrop-blur-md rounded-xl shadow-xl border border-slate-200 px-4 py-3 flex items-start gap-3">
-            <span className="text-2xl shrink-0">{activeReminderNotification.icon}</span>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-slate-800">{activeReminderNotification.title}</p>
-              <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">{activeReminderNotification.content}</p>
+      {/* --- Reminder Notification Stack (Editor route only) --- */}
+      {/* Only shown while editing: excluded from Preview Mode (isPreviewActive) */}
+      {/* and the View/reference route (isReferenceMode) via !isPreviewMode. */}
+      {!isPreviewMode && !isFocusMode && visibleReminders.length > 0 && (
+        <div className="fixed bottom-28 left-1/2 -translate-x-1/2 z-[85] max-w-sm w-full mx-4 flex flex-col gap-2 pointer-events-none">
+          {/* Oldest first (top), newest last (bottom): new toasts slide in at the
+              bottom and existing ones move upward as the stack fills. */}
+          {visibleReminders.map((n) => (
+            <div key={n.key} className="animate-toast-in pointer-events-auto">
+              <div className="bg-white/95 backdrop-blur-md rounded-xl shadow-xl border border-slate-200 px-4 py-3 flex items-start gap-3">
+                <span className="text-2xl shrink-0">{n.icon}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-slate-800">{n.title}</p>
+                  <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">{n.content}</p>
+                </div>
+                <button
+                  onClick={() => dismissReminderNotification(n.key)}
+                  className="p-1 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition-colors shrink-0"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
             </div>
-            <button
-              onClick={dismissReminderNotification}
-              className="p-1 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition-colors shrink-0"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
+          ))}
         </div>
       )}
 
