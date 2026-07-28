@@ -617,6 +617,68 @@ export default function WorkflowApp() {
   const [isFocusMode, setIsFocusMode] = useState(false);
   const focusUsedFullscreenRef = useRef(false);
 
+  // --- Card Description Visibility (View route only) ---
+  // A DISPLAY-ONLY preference for the read-only View route: when descriptions
+  // are hidden, cards render their title alone (and auto-size to it) so a dense
+  // mind map can be scanned by structure. It never touches `node.content` -
+  // nothing is edited, collapsed or removed from storage, and the editor route
+  // is unaffected (see `descriptionsHidden` below, which is gated on
+  // isReferenceMode). Persisted per-browser so a presenter's choice sticks.
+  const [showCardDescriptions, setShowCardDescriptions] = useState(() => {
+    try {
+      return localStorage.getItem('tf-view-show-card-descriptions') !== '0';
+    } catch {
+      return true;
+    }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('tf-view-show-card-descriptions', showCardDescriptions ? '1' : '0'); } catch { /* ignore */ }
+  }, [showCardDescriptions]);
+  // Per-card escape hatch while descriptions are globally hidden: `{ [nodeId]: true }`
+  // marks the individual cards the viewer revealed via the hover eye button.
+  const [revealedDescriptionIds, setRevealedDescriptionIds] = useState({});
+
+  // TRUE only when the global "hide" setting is active on the View route. The
+  // editor route ignores the setting entirely, so cards there always show both
+  // title and description exactly as before.
+  const descriptionsHidden = isReferenceMode && !showCardDescriptions;
+
+  // Effective visibility for one card: globally shown, or individually revealed.
+  const isNodeDescriptionVisible = useCallback(
+    (nodeId) => !descriptionsHidden || !!revealedDescriptionIds[nodeId],
+    [descriptionsHidden, revealedDescriptionIds]
+  );
+
+  const toggleNodeDescription = useCallback((nodeId) => {
+    setRevealedDescriptionIds(prev => {
+      const next = { ...prev };
+      if (next[nodeId]) delete next[nodeId];
+      else next[nodeId] = true;
+      return next;
+    });
+  }, []);
+
+  // Flipping the global setting (or switching workspace) clears per-card reveals
+  // so "Hide" always starts from a genuinely clean canvas.
+  useEffect(() => {
+    setRevealedDescriptionIds(prev => (Object.keys(prev).length ? {} : prev));
+  }, [showCardDescriptions, activeTab]);
+
+  // Keyboard: Shift+D toggles descriptions (View route only). Focus Mode hides
+  // every toolbar, so the shortcut is the only way to toggle while presenting.
+  useEffect(() => {
+    if (!isReferenceMode) return;
+    const handleDescriptionKey = (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT' || e.target.isContentEditable) return;
+      if ((e.key === 'D' || e.key === 'd') && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        setShowCardDescriptions(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleDescriptionKey);
+    return () => window.removeEventListener('keydown', handleDescriptionKey);
+  }, [isReferenceMode]);
+
   // --- Pin System States ---
   const [showPinPanel, setShowPinPanel] = useState(false);
   const [focusedPinId, setFocusedPinId] = useState(null);
@@ -766,9 +828,13 @@ export default function WorkflowApp() {
   }, [transform]);
 
   // --- Node Dimensions Helper ---
-  const getNodeDimensions = useCallback((node) => {
+  // `options.includeContent === false` sizes the card from its TITLE ALONE. It is
+  // used when the description is hidden on the View route, so the card shrinks to
+  // the shape the title needs instead of reserving room for text nobody can see.
+  const getNodeDimensions = useCallback((node, options) => {
+    const includeContent = !(options && options.includeContent === false);
     const titleLen = (node.title || '').length;
-    const content = node.content || '';
+    const content = includeContent ? (node.content || '') : '';
     const contentLen = content.length;
     const newlineCount = (content.match(/\n/g) || []).length;
     const totalLen = titleLen + contentLen;
@@ -783,6 +849,14 @@ export default function WorkflowApp() {
     height = Math.max(60, Math.min(MAX_CARD_HEIGHT, height));
     return { width, height };
   }, []);
+
+  // Dimensions as the card is ACTUALLY drawn right now, accounting for a hidden
+  // description. Use this anywhere geometry must match what the viewer sees
+  // (rendering, centering); use getNodeDimensions for editor-only geometry.
+  const getRenderedNodeDimensions = useCallback(
+    (node) => getNodeDimensions(node, { includeContent: isNodeDescriptionVisible(node.id) }),
+    [getNodeDimensions, isNodeDescriptionVisible]
+  );
 
   // --- Zoom Helpers ---
   const handleZoom = useCallback((delta) => {
@@ -3434,7 +3508,7 @@ export default function WorkflowApp() {
         const node = nodes.find(n => n.id === selectedNodeIds[0]);
         if (!node) return;
         if (!workspaceRef.current) return;
-        const { width, height } = getNodeDimensions(node);
+        const { width, height } = getRenderedNodeDimensions(node);
         const cardCenterX = node.x + width / 2;
         const cardCenterY = node.y + height / 2;
         const rect = workspaceRef.current.getBoundingClientRect();
@@ -3457,7 +3531,7 @@ export default function WorkflowApp() {
       window.removeEventListener('keydown', handleFocusKey);
       if (animTimerRef.current) { clearTimeout(animTimerRef.current); animTimerRef.current = null; }
     };
-  }, [selectedNodeIds, nodes, showToast, getNodeDimensions]);
+  }, [selectedNodeIds, nodes, showToast, getRenderedNodeDimensions]);
 
   // --- P key toggles pin visibility, PP (double-press) toggles pin panel, Shift+P drops pin at viewport center ---
   useEffect(() => {
@@ -6635,7 +6709,9 @@ export default function WorkflowApp() {
       return null;
     }
 
-    const dims = getNodeDimensions(node);
+    // Rendered dimensions, so connectors stay attached to the card's real right
+    // edge when a hidden description has shrunk it.
+    const dims = getRenderedNodeDimensions(node);
     const coords = getLiveCoordinates(node, false);
     return {
       x: isSource ? coords.x + dims.width : coords.x,
@@ -7384,6 +7460,26 @@ export default function WorkflowApp() {
           </button>
           </>)}
 
+          {/* Card Description Show/Hide - View route only. Display-only: it never
+              edits or removes the stored note. */}
+          {isReferenceMode && (
+            <button
+              onClick={() => setShowCardDescriptions(prev => !prev)}
+              className={`flex items-center gap-1 px-1.5 sm:px-2.5 py-1 rounded-lg text-xs font-bold transition-all border ${
+                showCardDescriptions
+                  ? 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                  : 'bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100'
+              }`}
+              title={showCardDescriptions
+                ? 'Card descriptions: Show - click to hide them and shrink cards to their titles (Shift+D)'
+                : 'Card descriptions: Hide - click to show them on every card (Shift+D)'}
+              aria-pressed={!showCardDescriptions}
+            >
+              {showCardDescriptions ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+              <span className="hidden sm:inline">{showCardDescriptions ? 'Notes: Show' : 'Notes: Hide'}</span>
+            </button>
+          )}
+
           {/* Focus Mode (Immersive Canvas) - View route only, never in the editor */}
           {isReferenceMode && (
             <button
@@ -7595,7 +7691,7 @@ export default function WorkflowApp() {
                         const centerY = rect.height / 2;
                         
                         setTransform({
-                          x: centerX - n.x * transform.scale - (getNodeDimensions(n).width * transform.scale) / 2,
+                          x: centerX - n.x * transform.scale - (getRenderedNodeDimensions(n).width * transform.scale) / 2,
                           y: centerY - n.y * transform.scale - (140 * transform.scale) / 2,
                           scale: transform.scale
                         });
@@ -7961,7 +8057,10 @@ export default function WorkflowApp() {
 
               const theme = THEMES[node.theme] || THEMES.blue;
               const isDragging = draggingNode?.id === node.id;
-              const nodeDims = getNodeDimensions(node);
+              // Is this card's description drawn? (Always true in the editor.)
+              const descriptionVisible = isNodeDescriptionVisible(node.id);
+              // Size from the title alone while the description is hidden.
+              const nodeDims = getNodeDimensions(node, { includeContent: descriptionVisible });
               
               const coords = getLiveCoordinates(node, false);
               const displayX = coords.x;
@@ -8085,8 +8184,10 @@ export default function WorkflowApp() {
                     </div>
                   )}
 
-                  {/* Content */}
-                  {(node.content || editingTextNode === node.id) ? (
+                  {/* Content (description/note). Rendered only when visible, so a
+                      hidden description occupies no space at all - the card
+                      collapses to its title rather than leaving a gap. */}
+                  {descriptionVisible && ((node.content || editingTextNode === node.id) ? (
                     <div className="mt-2 flex-1 overflow-hidden" onPointerDown={(e) => { if (editMode) e.stopPropagation(); }}>
                       {editingTextNode === node.id ? (
                         <textarea 
@@ -8116,7 +8217,7 @@ export default function WorkflowApp() {
                     >
                       <span className="text-slate-400 italic text-xs">+ Add notes...</span>
                     </div>
-                  )}
+                  ))}
 
                   {/* Link Portal */}
                   {node.linkToTab && (
@@ -8134,6 +8235,30 @@ export default function WorkflowApp() {
                   {node.cloneSourceId && (
                     <div className="absolute bottom-2 right-2">
                       <Copy className="w-3 h-3 text-violet-400" />
+                    </div>
+                  )}
+
+                  {/* Per-card description reveal (View route, descriptions hidden).
+                      Hover only exposes this button - never the note itself - so the
+                      canvas stays calm until the viewer deliberately asks for detail.
+                      Cards with no note get no button, since there is nothing to reveal.
+                      The button is deliberately NOT `pointer-events-none` while faded
+                      out: it sits above the card's box, so it must stay hit-testable
+                      for the parent's :hover to survive the cursor moving onto it. */}
+                  {descriptionsHidden && !!node.content && (
+                    <div
+                      className="absolute -top-7 right-1 flex items-center opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity bg-white rounded-md shadow border border-slate-200 px-1 py-0.5 z-40"
+                      onPointerDown={(e) => e.stopPropagation()}
+                    >
+                      <button
+                        onClick={(e) => { e.stopPropagation(); toggleNodeDescription(node.id); }}
+                        className={`p-1 rounded transition-colors hover:bg-slate-100 ${descriptionVisible ? 'text-indigo-600' : 'text-slate-500'}`}
+                        title={descriptionVisible ? 'Hide this card\u2019s description' : 'Show this card\u2019s description'}
+                        aria-label={descriptionVisible ? 'Hide this card\u2019s description' : 'Show this card\u2019s description'}
+                        aria-pressed={descriptionVisible}
+                      >
+                        {descriptionVisible ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                      </button>
                     </div>
                   )}
 
@@ -8381,8 +8506,16 @@ export default function WorkflowApp() {
               </button>
               <div className="h-px w-5 bg-slate-200 my-0.5" />
               </>)}
-              {/* Focus Mode toggle - View route only (immersive canvas) */}
+              {/* Card description Show/Hide + Focus Mode - View route only */}
               {isReferenceMode && (<>
+              <button
+                onClick={() => setShowCardDescriptions(prev => !prev)}
+                className={`p-1.5 sm:p-2 rounded-md transition-colors ${showCardDescriptions ? 'text-slate-600 hover:bg-slate-100' : 'bg-indigo-50 text-indigo-600'}`}
+                title={showCardDescriptions ? 'Hide card descriptions (Shift+D)' : 'Show card descriptions (Shift+D)'}
+                aria-pressed={!showCardDescriptions}
+              >
+                {showCardDescriptions ? <Eye className="w-4 h-4 sm:w-5 sm:h-5" /> : <EyeOff className="w-4 h-4 sm:w-5 sm:h-5" />}
+              </button>
               <button
                 onClick={toggleFocusMode}
                 className="p-1.5 sm:p-2 rounded-md transition-colors text-slate-600 hover:bg-indigo-50 hover:text-indigo-600"
