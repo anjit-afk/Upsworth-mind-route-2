@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { 
   Plus, Trash2, X, ChevronDown, 
@@ -458,6 +458,17 @@ export default function WorkflowApp() {
   const [activeTab, setActiveTab] = useState('');
   const [nextId, setNextId] = useState(10);
   const [initialized, setInitialized] = useState(false);
+
+  // --- X-Ray Cards (debug / visual aid) ---
+  // Fades every card to 50% so perfectly stacked cards become visible: one card
+  // over white reads as 50% colour, two stacked read as 75%, so an overlap shows
+  // up as a denser patch. Deliberately NOT persisted to localStorage - a debug
+  // flag that survives reloads gets forgotten and then looks like a render bug.
+  // Note: the fade must be applied per-card, never to the shared transform layer.
+  // `opacity` on an ancestor flattens its whole subtree into one composited
+  // layer, so stacked children would blend at full alpha and two cards would
+  // render pixel-identical to one - hiding the exact thing this reveals.
+  const [xrayCards, setXrayCards] = useState(false);
 
   // --- Routing (Milestone 1) ---
   // The URL is the per-tab source of truth for which workspace this tab shows.
@@ -2581,6 +2592,21 @@ export default function WorkflowApp() {
   const nodes = activeWs?.nodes || [];
   const edges = activeWs?.edges || [];
   const groups = activeWs?.groups || [];
+
+  // --- Duplicate Card ID Detector (debug / visual aid) ---
+  // The architecture assumes every card id is unique; when it isn't, two cards
+  // behave as one object (same position, same group, shared connections, cannot
+  // be dragged or deleted independently). This reads the `nodes` DATA rather
+  // than the DOM, which matters: cards render with `key={node.id}`, so React
+  // warns about the duplicate key and de-duplicates the siblings on re-render.
+  // When that happens only one DOM node exists and no styling trick could ever
+  // reveal the second card - but this set still flags it.
+  const duplicateNodeIds = useMemo(() => {
+    const seen = new Set();
+    const dupes = new Set();
+    for (const n of nodes) (seen.has(n.id) ? dupes : seen).add(n.id);
+    return dupes;
+  }, [nodes]);
 
   const cardEditorNode = (selectedNodeIds.length === 1) ? nodes.find(n => n.id === selectedNodeIds[0]) : null;
 
@@ -8129,6 +8155,8 @@ export default function WorkflowApp() {
               const displayY = coords.y;
 
               const isFocused = focusedNodeId === node.id;
+              // Debug aid: this card shares its id with another card in the workspace.
+              const hasDuplicateId = duplicateNodeIds.has(node.id);
 
               return (
                 <div
@@ -8139,7 +8167,7 @@ export default function WorkflowApp() {
                     isFocused ? 'ring-4 ring-indigo-500 animate-[pulse_1.5s_infinite]' : ''
                   } ${selectedNodeIds.includes(node.id) ? 'ring-2 ring-offset-1' : 'border-slate-200 hover:border-slate-300'} ${
                     connectHoverNodeId === node.id ? 'ring-2 ring-green-400 shadow-lg shadow-green-200/50' : ''
-                  }`}
+                  } ${xrayCards ? 'opacity-50' : ''}`}
                   style={{ 
                     left: displayX, 
                     top: displayY, 
@@ -8148,6 +8176,11 @@ export default function WorkflowApp() {
                     backgroundColor: theme.cardBg || '#bfdbfe',
                     padding: 12,
                     ...(selectedNodeIds.includes(node.id) ? { borderColor: theme.border || '#3b82f6' } : {}),
+                    // Duplicate-id marker. Uses `outline` rather than a Tailwind ring
+                    // class so it can never collide with the selection / focus /
+                    // connect-hover rings above, and dashed reads as "diagnostic"
+                    // instead of mimicking the solid selection rings.
+                    ...(hasDuplicateId ? { outline: '3px dashed #ef4444', outlineOffset: 3 } : {}),
                     zIndex: isDragging ? 9999 : (isFocused ? 999 : 50 + index) 
                   }}
                   onPointerEnter={() => { if (connecting && connecting.sourceId !== node.id) setConnectHoverNodeId(node.id); }}
@@ -8610,6 +8643,25 @@ export default function WorkflowApp() {
               <button onClick={() => handleZoom(-0.25)} className="p-1.5 sm:p-2 hover:bg-slate-100 text-slate-600 rounded-md transition-colors" title="Zoom Out"><ZoomOut className="w-4 h-4 sm:w-5 sm:h-5"/></button>
               <div className="h-px w-5 bg-slate-200 my-0.5" />
               <button onClick={() => { setShowMiniMap(prev => !prev); setMiniMapOpenedViaShortcut(false); }} className={`p-1.5 sm:p-2 hover:bg-slate-100 rounded-md transition-colors ${showMiniMap ? 'bg-indigo-50 text-indigo-600' : 'text-slate-600'}`} title="Toggle Mini Map (W)"><Map className="w-4 h-4 sm:w-5 sm:h-5"/></button>
+              <div className="h-px w-5 bg-slate-200 my-0.5" />
+              {/* X-Ray Cards (debug). Turns red on its own when duplicate card ids
+                  exist, so the problem announces itself without the toggle being on. */}
+              <button
+                onClick={() => setXrayCards(prev => !prev)}
+                className={`p-1.5 sm:p-2 rounded-md transition-colors ${
+                  duplicateNodeIds.size > 0
+                    ? 'bg-red-50 text-red-600 hover:bg-red-100'
+                    : xrayCards ? 'bg-indigo-50 text-indigo-600' : 'text-slate-600 hover:bg-slate-100'
+                }`}
+                title={duplicateNodeIds.size > 0
+                  ? `Warning: ${duplicateNodeIds.size} duplicate card ID${duplicateNodeIds.size > 1 ? 's' : ''} in this workspace (outlined in red dashes). Click to fade all cards to 50% and reveal stacked ones.`
+                  : xrayCards
+                    ? 'X-Ray Cards: on - click to restore full opacity'
+                    : 'X-Ray Cards - fade all cards to 50% to reveal overlapping/stacked cards'}
+                aria-pressed={xrayCards}
+              >
+                <Layers className="w-4 h-4 sm:w-5 sm:h-5"/>
+              </button>
             </div>
           </div>
 
